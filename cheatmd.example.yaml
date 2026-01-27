@@ -1,0 +1,38 @@
+# CheatMD configuration file
+# Place at ~/.config/cheatmd/cheatmd.yaml
+
+# Default cheat directory (supports ~ expansion)
+path: ~/notes/cheats
+
+# Output mode: print, copy, exec
+output: print
+
+# Shell to use for variable generation
+shell: /bin/bash
+
+# Extra fzf options (applied to main selection)
+fzf_opts: ""
+
+# Column colors (ANSI codes)
+# Common: 30=black, 31=red, 32=green, 33=yellow, 34=blue, 35=magenta, 36=cyan, 37=white
+# Bright: 90=gray, 91=bright red, 92=bright green, etc.
+# Bold: prefix with "1;" e.g. "1;36" for bold cyan
+color_header: "36"   # Cyan for headers
+color_command: "32"  # Green for commands
+color_desc: "90"     # Gray for descriptions
+
+# Column widths (max characters)
+column_header: 40    # Header column width
+column_desc: 40      # Description column width
+column_command: 60   # Command column width
+column_gap: 4        # Spacing between columns
+
+# Only show cheats that have a <!-- cheat --> block
+# Set to true to hide plain code blocks without cheat metadata
+require_cheat_block: false
+
+# Hooks (prepended/appended to the final command)
+# Example: pre_hook: "cd ~/projects && "
+# Example: post_hook: " && notify-send 'Done'"
+pre_hook: ""
+post_hook: ""
