@@ -1,33 +1,55 @@
 package ui
 
 import (
+	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/gubarz/cheatmd/internal/config"
 )
 
 // ============================================================================
 // Variable Select Model - For selecting from a list of options
 // ============================================================================
 
+// SelectOptions holds display options for selection
+type SelectOptions struct {
+	Delimiter string
+	Column    int    // 1-indexed, 0 = all
+	MapCmd    string // command to transform selected value
+}
+
 // varSelectModel is for selecting from a list of options
 type varSelectModel struct {
 	varName      string
 	header       string
 	customHeader string
-	options      []string
-	filtered     []string
+	options      []string // original values
+	displayOpts  []string // what to display (may be transformed by delimiter/column)
+	filtered     []filteredOption
 	cursor       int
 	textInput    textinput.Model
 	width        int
 	height       int
 	selected     string
 	cancelled    bool
+	selectOpts   SelectOptions
+}
+
+// filteredOption pairs display text with original value
+type filteredOption struct {
+	display  string
+	original string
 }
 
 // newVarSelectModel creates a new variable selection model
 func newVarSelectModel(varName string, options []string, header, customHeader, prefill string) varSelectModel {
+	return newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, SelectOptions{})
+}
+
+// newVarSelectModelWithOpts creates a variable selection model with display options
+func newVarSelectModelWithOpts(varName string, options []string, header, customHeader, prefill string, opts SelectOptions) varSelectModel {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter or enter custom value..."
 	ti.Focus()
@@ -38,14 +60,36 @@ func newVarSelectModel(varName string, options []string, header, customHeader, p
 		ti.SetValue(prefill)
 	}
 
+	// Build filtered options with display text
+	filtered := make([]filteredOption, len(options))
+	for i, opt := range options {
+		filtered[i] = filteredOption{
+			display:  getDisplayColumn(opt, opts.Delimiter, opts.Column),
+			original: opt,
+		}
+	}
+
 	return varSelectModel{
 		varName:      varName,
 		header:       header,
 		customHeader: customHeader,
 		options:      options,
-		filtered:     options,
+		filtered:     filtered,
 		textInput:    ti,
+		selectOpts:   opts,
 	}
+}
+
+// getDisplayColumn extracts the display column from a line
+func getDisplayColumn(line, delimiter string, column int) string {
+	if delimiter == "" || column == 0 {
+		return line
+	}
+	parts := strings.Split(line, delimiter)
+	if column > 0 && column <= len(parts) {
+		return strings.TrimSpace(parts[column-1])
+	}
+	return line
 }
 
 // Init implements tea.Model
@@ -85,7 +129,7 @@ func (m *varSelectModel) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 	case "enter":
 		if m.cursor < len(m.filtered) {
-			m.selected = m.filtered[m.cursor]
+			m.selected = m.filtered[m.cursor].original // Return original value, not display
 		} else {
 			m.selected = m.textInput.Value()
 		}
@@ -96,7 +140,7 @@ func (m *varSelectModel) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 		m.moveCursor(1)
 	case "tab":
 		if m.cursor < len(m.filtered) {
-			m.textInput.SetValue(m.filtered[m.cursor])
+			m.textInput.SetValue(m.filtered[m.cursor].display)
 		}
 	}
 	return nil
@@ -113,13 +157,25 @@ func (m *varSelectModel) filterOptions() {
 	query := strings.TrimSpace(strings.ToLower(m.textInput.Value()))
 
 	if query == "" {
-		m.filtered = m.options
+		// No filter - show all options
+		m.filtered = make([]filteredOption, len(m.options))
+		for i, opt := range m.options {
+			m.filtered[i] = filteredOption{
+				display:  getDisplayColumn(opt, m.selectOpts.Delimiter, m.selectOpts.Column),
+				original: opt,
+			}
+		}
 	} else {
 		words := strings.Fields(query)
-		m.filtered = make([]string, 0, len(m.options))
+		m.filtered = make([]filteredOption, 0, len(m.options))
 		for _, opt := range m.options {
-			if matchesAllWords(strings.ToLower(opt), words) {
-				m.filtered = append(m.filtered, opt)
+			display := getDisplayColumn(opt, m.selectOpts.Delimiter, m.selectOpts.Column)
+			// Match against both display and original
+			if matchesAllWords(strings.ToLower(display), words) || matchesAllWords(strings.ToLower(opt), words) {
+				m.filtered = append(m.filtered, filteredOption{
+					display:  display,
+					original: opt,
+				})
 			}
 		}
 	}
@@ -182,10 +238,10 @@ func (m varSelectModel) renderBottom(width int) string {
 		opt := m.filtered[i]
 		if i == m.cursor {
 			b.WriteString(styles.Cursor.Render("▶ "))
-			b.WriteString(styles.Selected.Render(styles.Command.Render(opt)))
+			b.WriteString(styles.Selected.Render(styles.Command.Render(opt.display)))
 		} else {
 			b.WriteString("  ")
-			b.WriteString(styles.Command.Render(opt))
+			b.WriteString(styles.Command.Render(opt.display))
 		}
 		b.WriteString("\n")
 	}
@@ -331,11 +387,23 @@ func (m varInputModel) renderBottom(width int) string {
 // SelectWithTUI displays options for variable selection
 // Returns (value, goBack, error) - if value is "__EXIT__" caller should exit completely
 func SelectWithTUI(varName string, options []string, header, customHeader, prefill string) (string, bool, error) {
+	return SelectWithTUIOptions(varName, options, header, customHeader, prefill, selectorOptions{})
+}
+
+// SelectWithTUIOptions displays options for variable selection with display options
+// Returns (value, goBack, error) - if value is "__EXIT__" caller should exit completely
+func SelectWithTUIOptions(varName string, options []string, header, customHeader, prefill string, opts selectorOptions) (string, bool, error) {
 	ttyIn, ttyOut, cleanup := getTTY()
 	RefreshStyles() // Refresh after getTTY sets up the renderer
 	defer cleanup()
 
-	m := newVarSelectModel(varName, options, header, customHeader, prefill)
+	selectOpts := SelectOptions{
+		Delimiter: opts.delimiter,
+		Column:    opts.column,
+		MapCmd:    opts.mapCmd,
+	}
+
+	m := newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, selectOpts)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(ttyOut), tea.WithInput(ttyIn))
 
 	finalModel, err := p.Run()
@@ -350,7 +418,28 @@ func SelectWithTUI(varName string, options []string, header, customHeader, prefi
 	if result.cancelled {
 		return "", true, nil
 	}
-	return result.selected, false, nil
+
+	// Apply map transform if specified
+	selected := result.selected
+	if opts.mapCmd != "" {
+		selected = applyMapTransformCmd(selected, opts.mapCmd)
+	}
+
+	return selected, false, nil
+}
+
+// applyMapTransformCmd runs the map command on the selected value
+func applyMapTransformCmd(value, mapCmd string) string {
+	if mapCmd == "" {
+		return value
+	}
+	cmd := exec.Command(config.GetShell(), "-c", mapCmd)
+	cmd.Stdin = strings.NewReader(value)
+	out, err := cmd.Output()
+	if err != nil {
+		return value // fallback to original on error
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // PromptWithTUI displays an input prompt for variable entry

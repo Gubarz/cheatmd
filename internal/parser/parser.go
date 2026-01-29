@@ -37,12 +37,14 @@ func NewCheat(file, header string) *Cheat {
 
 // VarDef represents a variable definition
 type VarDef struct {
-	Name  string // Variable name
-	Shell string // Shell command to generate values
-	Args  string // Selector arguments after ---
+	Name      string // Variable name
+	Shell     string // Shell command to generate values (for = syntax)
+	Literal   string // Literal value with var substitution (for := syntax)
+	Args      string // Selector arguments after ---
+	Condition string // Conditional expression: "$var == value" or "$var != value"
 }
 
-// ParseVarDef parses a variable definition from name and value
+// ParseVarDef parses a variable definition from name and value (shell command)
 func ParseVarDef(name, value string) VarDef {
 	v := VarDef{Name: name}
 	if idx := strings.Index(value, "---"); idx != -1 {
@@ -51,6 +53,30 @@ func ParseVarDef(name, value string) VarDef {
 	} else {
 		v.Shell = strings.TrimSpace(value)
 	}
+	return v
+}
+
+// ParseVarDefLiteral parses a literal variable definition (no shell, just substitution)
+func ParseVarDefLiteral(name, value string) VarDef {
+	v := VarDef{Name: name}
+	if idx := strings.Index(value, "---"); idx != -1 {
+		v.Literal = strings.TrimSpace(value[:idx])
+		v.Args = strings.TrimSpace(value[idx+3:])
+	} else {
+		v.Literal = strings.TrimSpace(value)
+	}
+	return v
+}
+
+// ParseVarDefWithCondition parses a variable definition with an optional condition
+func ParseVarDefWithCondition(name, value, condition string, isLiteral bool) VarDef {
+	var v VarDef
+	if isLiteral {
+		v = ParseVarDefLiteral(name, value)
+	} else {
+		v = ParseVarDef(name, value)
+	}
+	v.Condition = condition
 	return v
 }
 
@@ -117,6 +143,9 @@ var patterns = struct {
 	export          *regexp.Regexp
 	importStmt      *regexp.Regexp
 	varDef          *regexp.Regexp
+	varDefLiteral   *regexp.Regexp
+	ifStart         *regexp.Regexp
+	ifEnd           *regexp.Regexp
 }{
 	header:          regexp.MustCompile(`^(#{1,6})\s+(.+)$`),
 	codeBlockStart:  regexp.MustCompile("^```(\\w*)(?:\\s+title:\"([^\"]*)\")?\\s*$"),
@@ -126,6 +155,9 @@ var patterns = struct {
 	export:          regexp.MustCompile(`^export\s+(\S+)$`),
 	importStmt:      regexp.MustCompile(`^import\s+(\S+)$`),
 	varDef:          regexp.MustCompile(`^var\s+(\w+)\s*=\s*(.+)$`),
+	varDefLiteral:   regexp.MustCompile(`^var\s+(\w+)\s*:=\s*(.+)$`),
+	ifStart:         regexp.MustCompile(`^if\s+(.+)$`),
+	ifEnd:           regexp.MustCompile(`^fi$`),
 }
 
 // shellLanguages defines which code block languages are treated as shell
@@ -373,9 +405,26 @@ func (p *Parser) createCheat(path, header, description, command, cheatBlock stri
 
 // parseCheatDSL parses the DSL content within a cheat block
 func parseCheatDSL(cheat *Cheat, content string) {
-	for _, line := range strings.Split(content, "\n") {
+	// First, join lines that end with backslash (line continuation)
+	lines := joinContinuationLines(strings.Split(content, "\n"))
+
+	// Track current condition for if/fi blocks
+	var currentCondition string
+
+	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Handle if/fi blocks
+		if matches := patterns.ifStart.FindStringSubmatch(line); matches != nil {
+			currentCondition = strings.TrimSpace(matches[1])
+			continue
+		}
+
+		if patterns.ifEnd.MatchString(line) {
+			currentCondition = ""
 			continue
 		}
 
@@ -389,10 +438,42 @@ func parseCheatDSL(cheat *Cheat, content string) {
 			continue
 		}
 
+		// Check for literal assignment first (:=) before shell assignment (=)
+		if matches := patterns.varDefLiteral.FindStringSubmatch(line); matches != nil {
+			cheat.Vars = append(cheat.Vars, ParseVarDefWithCondition(matches[1], matches[2], currentCondition, true))
+			continue
+		}
+
 		if matches := patterns.varDef.FindStringSubmatch(line); matches != nil {
-			cheat.Vars = append(cheat.Vars, ParseVarDef(matches[1], matches[2]))
+			cheat.Vars = append(cheat.Vars, ParseVarDefWithCondition(matches[1], matches[2], currentCondition, false))
 		}
 	}
+}
+
+// joinContinuationLines joins lines that end with backslash
+func joinContinuationLines(lines []string) []string {
+	var result []string
+	var current strings.Builder
+
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, " \t")
+		if strings.HasSuffix(trimmed, "\\") {
+			// Line continues - remove backslash and append
+			current.WriteString(strings.TrimSuffix(trimmed, "\\"))
+		} else {
+			// Line ends - append and flush
+			current.WriteString(line)
+			result = append(result, current.String())
+			current.Reset()
+		}
+	}
+
+	// Don't forget any remaining content
+	if current.Len() > 0 {
+		result = append(result, current.String())
+	}
+
+	return result
 }
 
 // ============================================================================

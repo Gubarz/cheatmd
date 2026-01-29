@@ -66,3 +66,22 @@ tar -xvf $file -C $dest
 var file = find . -maxdepth 1 -name "*.tar*" -o -name "*.tgz" 2>/dev/null --- --header "Select archive"
 var dest = echo "." --- --header "Destination directory"
 -->
+
+## SSH: connect with auth method
+
+```sh title:"SSH with flexible authentication."
+ssh $ssh_flags $user@$host
+```
+<!-- cheat
+var host = --- --header "Hostname"
+var user = echo "$USER" --- --header "Username"
+var auth_method = printf 'key\tUse SSH key (default)\npassword\tUse password\n' --- --delimiter '\t' --column 2 --map "cut -f1"
+
+if $auth_method == key
+var ssh_flags := -o PreferredAuthentications=publickey
+fi
+
+if $auth_method == password
+var ssh_flags := -o PreferredAuthentications=password
+fi
+-->

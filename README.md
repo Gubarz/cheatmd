@@ -88,6 +88,7 @@ path: ~/cheats
 output: print          # print, copy, exec
 shell: /bin/bash
 require_cheat_block: false
+auto_continue: false   # Auto-accept env vars without prompting
 ```
 
 ## DSL
@@ -95,8 +96,27 @@ require_cheat_block: false
 ```
 var <name> = <shell>               # Variable from shell output
 var <name> = <shell> --- <opts>    # With options (e.g. --header "Title")
+var <name> := <value>              # Literal value (no shell, with $var substitution)
 export <name>                      # Make module importable
 import <name>                      # Use exported module
+
+# Conditionals
+if $var == value
+var <name> := <value>
+fi
+
+if $var != value
+var <name> = <shell>
+fi
+```
+
+### Selector Options
+
+```
+--header "Title"           # Custom header text
+--delimiter "\t"           # Split lines by delimiter
+--column 2                 # Display specific column
+--map "cut -f1"            # Transform selected value
 ```
 
 ## License

@@ -21,6 +21,7 @@ type Config struct {
 	PostHook          string `mapstructure:"post_hook"`
 	RequireCheatBlock bool   `mapstructure:"require_cheat_block"`
 	AutoSelect        bool   `mapstructure:"auto_select"`
+	AutoContinue      bool   `mapstructure:"auto_continue"`
 
 	// Colors
 	Colors ColorConfig
@@ -62,6 +63,7 @@ var defaults = struct {
 	postHook          string
 	requireCheatBlock bool
 	autoSelect        bool
+	autoContinue      bool
 	colors            ColorConfig
 	columns           ColumnConfig
 }{
@@ -72,6 +74,7 @@ var defaults = struct {
 	postHook:          "",
 	requireCheatBlock: false,
 	autoSelect:        false,
+	autoContinue:      false,
 	colors: ColorConfig{
 		Header:   "36",  // Cyan
 		Command:  "32",  // Green
@@ -125,6 +128,7 @@ func setDefaults() {
 	viper.SetDefault("post_hook", defaults.postHook)
 	viper.SetDefault("require_cheat_block", defaults.requireCheatBlock)
 	viper.SetDefault("auto_select", defaults.autoSelect)
+	viper.SetDefault("auto_continue", defaults.autoContinue)
 
 	// Colors
 	viper.SetDefault("color_header", defaults.colors.Header)
@@ -195,6 +199,11 @@ func GetRequireCheatBlock() bool {
 // GetAutoSelect returns whether to auto-select single matches
 func GetAutoSelect() bool {
 	return viper.GetBool("auto_select")
+}
+
+// GetAutoContinue returns whether to auto-continue when vars are prefilled from environment
+func GetAutoContinue() bool {
+	return viper.GetBool("auto_continue")
 }
 
 // ============================================================================

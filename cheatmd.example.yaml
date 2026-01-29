@@ -30,6 +30,11 @@ column_gap: 4
 # Only show cheats that have a <!-- cheat --> block
 require_cheat_block: false
 
+# Auto-continue when variables are prefilled from environment
+# When true, if a var is already set (e.g., export domain=example.com),
+# it will be used without prompting. Press ESC to go back and edit.
+auto_continue: false
+
 # Hooks (prepended/appended to the final command)
 # Example: pre_hook: "cd ~/projects && "
 # Example: post_hook: " && notify-send 'Done'"
