@@ -107,7 +107,7 @@ func resolveAllVariables(cheat *parser.Cheat, index *parser.CheatIndex, exec *ex
 
 		header := buildProgressHeader(cheat.Command, vars, currentIdx)
 
-		value, goBack, err := resolveVar(vs.def, scope, exec, header, vs.prefill)
+		value, goBack, err := resolveVar(vs.def, scope, exec, header, vs.prefill, cheat.File)
 		if err != nil {
 			return false, err
 		}
@@ -380,7 +380,7 @@ func replaceVar(cmd, varName, replacement string) string {
 }
 
 // resolveVar resolves a single variable using the TUI
-func resolveVar(v parser.VarDef, scope map[string]string, exec *executor.Executor, header, prefill string) (string, bool, error) {
+func resolveVar(v parser.VarDef, scope map[string]string, exec *executor.Executor, header, prefill, filePath string) (string, bool, error) {
 	customHeader := extractCustomHeader(v.Args)
 
 	// Debug: show what we're working with
@@ -406,7 +406,7 @@ func resolveVar(v parser.VarDef, scope map[string]string, exec *executor.Executo
 
 	if strings.TrimSpace(v.Shell) == "" {
 		// No shell command defined - just prompt
-		return PromptWithTUI(v.Name, header, customHeader, prefill)
+		return PromptWithTUI(v.Name, header, customHeader, prefill, filePath)
 	}
 
 	// Substitute scope into shell command
@@ -425,7 +425,7 @@ func resolveVar(v parser.VarDef, scope map[string]string, exec *executor.Executo
 			fmt.Fprintf(os.Stderr, "[DEBUG]   Error: %v\n", err)
 		}
 		// Command failed - show prompt with customHeader
-		return PromptWithTUI(v.Name, header, customHeader, prefill)
+		return PromptWithTUI(v.Name, header, customHeader, prefill, filePath)
 	}
 
 	lines := splitLines(output)
@@ -439,16 +439,16 @@ func resolveVar(v parser.VarDef, scope map[string]string, exec *executor.Executo
 	switch len(lines) {
 	case 0:
 		// No output - show prompt
-		return PromptWithTUI(v.Name, header, customHeader, prefill)
+		return PromptWithTUI(v.Name, header, customHeader, prefill, filePath)
 	case 1:
 		// Single result - prefill the prompt with it so user can accept or modify
 		if prefill == "" {
 			prefill = applyMapTransform(lines[0], opts)
 		}
-		return PromptWithTUI(v.Name, header, customHeader, prefill)
+		return PromptWithTUI(v.Name, header, customHeader, prefill, filePath)
 	default:
 		// Multiple results - show selection with options
-		return SelectWithTUIOptions(v.Name, lines, header, customHeader, prefill, opts)
+		return SelectWithTUIOptions(v.Name, lines, header, customHeader, prefill, filePath, opts)
 	}
 }
 

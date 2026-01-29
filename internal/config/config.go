@@ -17,6 +17,7 @@ type Config struct {
 	Path              string `mapstructure:"path"`
 	Output            string `mapstructure:"output"`
 	Shell             string `mapstructure:"shell"`
+	Editor            string `mapstructure:"editor"`
 	PreHook           string `mapstructure:"pre_hook"`
 	PostHook          string `mapstructure:"post_hook"`
 	RequireCheatBlock bool   `mapstructure:"require_cheat_block"`
@@ -59,6 +60,7 @@ var defaults = struct {
 	path              string
 	output            string
 	shell             string
+	editor            string
 	preHook           string
 	postHook          string
 	requireCheatBlock bool
@@ -70,6 +72,7 @@ var defaults = struct {
 	path:              ".",
 	output:            "print",
 	shell:             "", // Set dynamically
+	editor:            "", // Empty means use system default (xdg-open/open/start)
 	preHook:           "",
 	postHook:          "",
 	requireCheatBlock: false,
@@ -124,6 +127,7 @@ func setDefaults() {
 	viper.SetDefault("path", defaults.path)
 	viper.SetDefault("output", defaults.output)
 	viper.SetDefault("shell", shell)
+	viper.SetDefault("editor", defaults.editor)
 	viper.SetDefault("pre_hook", defaults.preHook)
 	viper.SetDefault("post_hook", defaults.postHook)
 	viper.SetDefault("require_cheat_block", defaults.requireCheatBlock)
@@ -189,6 +193,11 @@ func GetPreHook() string {
 // GetPostHook returns the post-execution hook
 func GetPostHook() string {
 	return viper.GetString("post_hook")
+}
+
+// GetEditor returns the configured editor command (empty = system default)
+func GetEditor() string {
+	return viper.GetString("editor")
 }
 
 // GetRequireCheatBlock returns whether to require cheat blocks

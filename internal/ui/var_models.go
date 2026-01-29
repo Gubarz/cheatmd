@@ -35,6 +35,7 @@ type varSelectModel struct {
 	selected     string
 	cancelled    bool
 	selectOpts   SelectOptions
+	filePath     string // source file for opening with ctrl+o
 }
 
 // filteredOption pairs display text with original value
@@ -44,12 +45,12 @@ type filteredOption struct {
 }
 
 // newVarSelectModel creates a new variable selection model
-func newVarSelectModel(varName string, options []string, header, customHeader, prefill string) varSelectModel {
-	return newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, SelectOptions{})
+func newVarSelectModel(varName string, options []string, header, customHeader, prefill, filePath string) varSelectModel {
+	return newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, filePath, SelectOptions{})
 }
 
 // newVarSelectModelWithOpts creates a variable selection model with display options
-func newVarSelectModelWithOpts(varName string, options []string, header, customHeader, prefill string, opts SelectOptions) varSelectModel {
+func newVarSelectModelWithOpts(varName string, options []string, header, customHeader, prefill, filePath string, opts SelectOptions) varSelectModel {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter or enter custom value..."
 	ti.Focus()
@@ -77,6 +78,7 @@ func newVarSelectModelWithOpts(varName string, options []string, header, customH
 		filtered:     filtered,
 		textInput:    ti,
 		selectOpts:   opts,
+		filePath:     filePath,
 	}
 }
 
@@ -141,6 +143,10 @@ func (m *varSelectModel) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 	case "tab":
 		if m.cursor < len(m.filtered) {
 			m.textInput.SetValue(m.filtered[m.cursor].display)
+		}
+	case "ctrl+o":
+		if m.filePath != "" {
+			openFileInViewer(m.filePath)
 		}
 	}
 	return nil
@@ -214,11 +220,11 @@ func (m varSelectModel) renderHeader() string {
 
 	if m.customHeader != "" {
 		b.WriteString(styles.Cursor.Render(m.customHeader))
-		b.WriteString(styles.Dim.Render(" • ESC to go back • Enter to select"))
+		b.WriteString(styles.Dim.Render(" • Ctrl+O open • ESC back • Enter select"))
 	} else {
 		b.WriteString(styles.Dim.Render("Select value for "))
 		b.WriteString(styles.Cursor.Render("$" + m.varName))
-		b.WriteString(styles.Dim.Render(" • ESC to go back • Enter to select"))
+		b.WriteString(styles.Dim.Render(" • Ctrl+O open • ESC back • Enter select"))
 	}
 
 	return b.String()
@@ -268,10 +274,11 @@ type varInputModel struct {
 	height       int
 	value        string
 	cancelled    bool
+	filePath     string // source file for opening with ctrl+o
 }
 
 // newVarInputModel creates a new variable input model
-func newVarInputModel(varName, header, customHeader, prefill string) varInputModel {
+func newVarInputModel(varName, header, customHeader, prefill, filePath string) varInputModel {
 	ti := textinput.New()
 	ti.Placeholder = "Enter value..."
 	ti.Focus()
@@ -287,6 +294,7 @@ func newVarInputModel(varName, header, customHeader, prefill string) varInputMod
 		header:       header,
 		customHeader: customHeader,
 		textInput:    ti,
+		filePath:     filePath,
 	}
 }
 
@@ -326,6 +334,10 @@ func (m *varInputModel) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		m.value = m.textInput.Value()
 		return tea.Quit
+	case "ctrl+o":
+		if m.filePath != "" {
+			openFileInViewer(m.filePath)
+		}
 	}
 	return nil
 }
@@ -361,11 +373,11 @@ func (m varInputModel) renderHeader() string {
 
 	if m.customHeader != "" {
 		b.WriteString(styles.Cursor.Render(m.customHeader))
-		b.WriteString(styles.Dim.Render(" • ESC to go back • Enter to confirm"))
+		b.WriteString(styles.Dim.Render(" • Ctrl+O open • ESC back • Enter confirm"))
 	} else {
 		b.WriteString(styles.Dim.Render("Enter value for "))
 		b.WriteString(styles.Cursor.Render("$" + m.varName))
-		b.WriteString(styles.Dim.Render(" • ESC to go back • Enter to confirm"))
+		b.WriteString(styles.Dim.Render(" • Ctrl+O open • ESC back • Enter confirm"))
 	}
 
 	return b.String()
@@ -386,13 +398,13 @@ func (m varInputModel) renderBottom(width int) string {
 
 // SelectWithTUI displays options for variable selection
 // Returns (value, goBack, error) - if value is "__EXIT__" caller should exit completely
-func SelectWithTUI(varName string, options []string, header, customHeader, prefill string) (string, bool, error) {
-	return SelectWithTUIOptions(varName, options, header, customHeader, prefill, selectorOptions{})
+func SelectWithTUI(varName string, options []string, header, customHeader, prefill, filePath string) (string, bool, error) {
+	return SelectWithTUIOptions(varName, options, header, customHeader, prefill, filePath, selectorOptions{})
 }
 
 // SelectWithTUIOptions displays options for variable selection with display options
 // Returns (value, goBack, error) - if value is "__EXIT__" caller should exit completely
-func SelectWithTUIOptions(varName string, options []string, header, customHeader, prefill string, opts selectorOptions) (string, bool, error) {
+func SelectWithTUIOptions(varName string, options []string, header, customHeader, prefill, filePath string, opts selectorOptions) (string, bool, error) {
 	ttyIn, ttyOut, cleanup := getTTY()
 	RefreshStyles() // Refresh after getTTY sets up the renderer
 	defer cleanup()
@@ -403,7 +415,7 @@ func SelectWithTUIOptions(varName string, options []string, header, customHeader
 		MapCmd:    opts.mapCmd,
 	}
 
-	m := newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, selectOpts)
+	m := newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, filePath, selectOpts)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(ttyOut), tea.WithInput(ttyIn))
 
 	finalModel, err := p.Run()
@@ -452,12 +464,12 @@ func applyMapTransformCmd(value, mapCmd string) string {
 
 // PromptWithTUI displays an input prompt for variable entry
 // Returns (value, goBack, error) - if value is "__EXIT__" caller should exit completely
-func PromptWithTUI(varName, header, customHeader, prefill string) (string, bool, error) {
+func PromptWithTUI(varName, header, customHeader, prefill, filePath string) (string, bool, error) {
 	ttyIn, ttyOut, cleanup := getTTY()
 	RefreshStyles() // Refresh after getTTY sets up the renderer
 	defer cleanup()
 
-	m := newVarInputModel(varName, header, customHeader, prefill)
+	m := newVarInputModel(varName, header, customHeader, prefill, filePath)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(ttyOut), tea.WithInput(ttyIn))
 
 	finalModel, err := p.Run()

@@ -3,8 +3,10 @@ package ui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -155,6 +157,10 @@ func (m *mainModel) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 		m.cursor = 0
 	case "end", "ctrl+e":
 		m.cursor = max(0, len(m.filtered)-1)
+	case "ctrl+o":
+		if m.cursor < len(m.filtered) {
+			openFileInViewer(m.filtered[m.cursor].cheat.File)
+		}
 	}
 	return nil
 }
@@ -349,7 +355,9 @@ func (m mainModel) renderInput(width int) string {
 	b.WriteString("\n")
 	b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d/%d", len(m.filtered), len(m.cheats))))
 	b.WriteString(" • ")
-	b.WriteString(styles.Dim.Render("ESC to exit"))
+	b.WriteString(styles.Dim.Render("Ctrl+O open"))
+	b.WriteString(" • ")
+	b.WriteString(styles.Dim.Render("ESC exit"))
 	b.WriteString("\n")
 	b.WriteString(m.textInput.View())
 	return b.String()
@@ -641,4 +649,25 @@ func extractVarNames(cmd string) []string {
 		}
 	}
 	return names
+}
+
+// openFileInViewer opens the file in the configured editor or system default
+func openFileInViewer(filePath string) {
+	var cmd *exec.Cmd
+
+	// Check for configured editor first
+	if editor := config.GetEditor(); editor != "" {
+		cmd = exec.Command(editor, filePath)
+	} else {
+		// Fall back to system default
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = exec.Command("open", filePath)
+		case "windows":
+			cmd = exec.Command("cmd", "/c", "start", "", filePath)
+		default: // linux, freebsd, etc.
+			cmd = exec.Command("xdg-open", filePath)
+		}
+	}
+	_ = cmd.Start()
 }
