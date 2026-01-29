@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -396,7 +397,7 @@ func getTTY() (in *os.File, out *os.File, cleanup func()) {
 }
 
 // RunTUI launches the Bubble Tea interface
-func RunTUI(index *parser.CheatIndex, exec *executor.Executor, initialQuery string) error {
+func RunTUI(index *parser.CheatIndex, exec *executor.Executor, initialQuery, matchCmd string) error {
 	requireCheatBlock := config.GetRequireCheatBlock()
 	autoSelect := config.GetAutoSelect()
 
@@ -407,6 +408,20 @@ func RunTUI(index *parser.CheatIndex, exec *executor.Executor, initialQuery stri
 		}
 
 		m := newMainModel(cheats)
+
+		// If matchCmd is provided, try to find a cheat whose command matches
+		if matchCmd != "" {
+			if matched := findMatchingCheat(cheats, matchCmd); matched != nil {
+				m.selected = matched
+				// Pre-fill scope from the matched command
+				prefillScopeFromMatch(matched, matchCmd)
+			} else {
+				// No exact match - use as initial query
+				initialQuery = matchCmd
+			}
+			matchCmd = "" // Only try to match once
+		}
+
 		if initialQuery != "" {
 			m.textInput.SetValue(initialQuery)
 			m.filterCheats()
@@ -440,7 +455,10 @@ func RunTUI(index *parser.CheatIndex, exec *executor.Executor, initialQuery stri
 		}
 
 		cheat := m.selected
-		cheat.Scope = make(map[string]string)
+		// Initialize scope if nil, but preserve existing values (from --match)
+		if cheat.Scope == nil {
+			cheat.Scope = make(map[string]string)
+		}
 
 		goBack, err := resolveAllVariables(cheat, index, exec)
 		if err != nil {
@@ -542,4 +560,85 @@ func matchesAllWords(text string, words []string) bool {
 		}
 	}
 	return true
+}
+
+// findMatchingCheat finds a cheat whose command pattern matches the input
+// It builds a regex from the cheat command (replacing $var with capture groups)
+// and returns the first match
+func findMatchingCheat(cheats []*parser.Cheat, input string) *parser.Cheat {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil
+	}
+
+	for _, cheat := range cheats {
+		pattern := buildMatchPattern(cheat.Command)
+		if pattern.MatchString(input) {
+			return cheat
+		}
+	}
+	return nil
+}
+
+// buildMatchPattern converts a command template to a regex pattern for matching
+// e.g. "echo $name" -> "^echo (\S+)$"
+// e.g. 'echo "$name"' -> '^echo "([^"]*)"$'
+func buildMatchPattern(cmd string) *regexp.Regexp {
+	escaped := regexp.QuoteMeta(cmd)
+	// After QuoteMeta: "$var" becomes "\$var" (quotes not escaped, $ is escaped)
+	// Replace "\$var" inside double quotes with "([^"]*)"
+	quotedVarPattern := regexp.MustCompile(`"\\\$(\w+)"`)
+	escaped = quotedVarPattern.ReplaceAllString(escaped, `"([^"]*)"`)
+	// Same for single quotes
+	singleQuotedVarPattern := regexp.MustCompile(`'\\\$(\w+)'`)
+	escaped = singleQuotedVarPattern.ReplaceAllString(escaped, `'([^']*)'`)
+	// Replace remaining unquoted $var with non-whitespace match
+	varPattern := regexp.MustCompile(`\\\$(\w+)`)
+	escaped = varPattern.ReplaceAllString(escaped, `(\S+)`)
+	pattern := `^\s*` + escaped + `\s*$`
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return regexp.MustCompile(`^$`)
+	}
+	return re
+}
+
+// prefillScopeFromMatch extracts variable values from the matched command
+func prefillScopeFromMatch(cheat *parser.Cheat, input string) {
+	input = strings.TrimSpace(input)
+	pattern := buildMatchPattern(cheat.Command)
+	if pattern == nil {
+		return
+	}
+
+	matches := pattern.FindStringSubmatch(input)
+	if matches == nil {
+		return
+	}
+
+	if cheat.Scope == nil {
+		cheat.Scope = make(map[string]string)
+	}
+
+	varNames := extractVarNames(cheat.Command)
+	for i, name := range varNames {
+		if i+1 < len(matches) {
+			cheat.Scope[name] = matches[i+1]
+		}
+	}
+}
+
+// extractVarNames returns variable names in order of appearance
+func extractVarNames(cmd string) []string {
+	varPattern := regexp.MustCompile(`\$(\w+)`)
+	matches := varPattern.FindAllStringSubmatch(cmd, -1)
+	var names []string
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		if !seen[m[1]] {
+			names = append(names, m[1])
+			seen[m[1]] = true
+		}
+	}
+	return names
 }

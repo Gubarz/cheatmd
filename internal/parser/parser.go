@@ -104,10 +104,18 @@ func NewModule(cheat *Cheat) *Module {
 // Cheat Index
 // ============================================================================
 
+// DuplicateExport records a duplicate export definition
+type DuplicateExport struct {
+	Name  string
+	File1 string
+	File2 string
+}
+
 // CheatIndex holds all parsed cheats and modules
 type CheatIndex struct {
-	Cheats  []*Cheat
-	Modules map[string]*Module
+	Cheats     []*Cheat
+	Modules    map[string]*Module
+	Duplicates []DuplicateExport
 }
 
 // NewCheatIndex creates an empty cheat index
@@ -124,10 +132,19 @@ func (idx *CheatIndex) AddCheat(cheat *Cheat) {
 }
 
 // RegisterModule registers a module from a cheat with an export
+// Tracks duplicates if the same export name is used multiple times
 func (idx *CheatIndex) RegisterModule(cheat *Cheat) {
-	if cheat.Export != "" {
-		idx.Modules[cheat.Export] = NewModule(cheat)
+	if cheat.Export == "" {
+		return
 	}
+	if existing, ok := idx.Modules[cheat.Export]; ok {
+		idx.Duplicates = append(idx.Duplicates, DuplicateExport{
+			Name:  cheat.Export,
+			File1: existing.File,
+			File2: cheat.File,
+		})
+	}
+	idx.Modules[cheat.Export] = NewModule(cheat)
 }
 
 // ============================================================================
@@ -144,6 +161,7 @@ var patterns = struct {
 	importStmt      *regexp.Regexp
 	varDef          *regexp.Regexp
 	varDefLiteral   *regexp.Regexp
+	varDefPrompt    *regexp.Regexp
 	ifStart         *regexp.Regexp
 	ifEnd           *regexp.Regexp
 }{
@@ -151,11 +169,12 @@ var patterns = struct {
 	codeBlockStart:  regexp.MustCompile("^```(\\w*)(?:\\s+title:\"([^\"]*)\")?\\s*$"),
 	cheatStart:      regexp.MustCompile(`(?i)^<!--\s*cheat\s*$`),
 	cheatEnd:        regexp.MustCompile(`(?i)^-->\s*$`),
-	cheatSingleLine: regexp.MustCompile(`(?i)^<!--\s*cheat\s+(.+?)\s*-->$`),
+	cheatSingleLine: regexp.MustCompile(`(?i)^<!--\s*cheat\s*(.*?)\s*-->$`),
 	export:          regexp.MustCompile(`^export\s+(\S+)$`),
 	importStmt:      regexp.MustCompile(`^import\s+(\S+)$`),
 	varDef:          regexp.MustCompile(`^var\s+(\w+)\s*=\s*(.+)$`),
 	varDefLiteral:   regexp.MustCompile(`^var\s+(\w+)\s*:=\s*(.+)$`),
+	varDefPrompt:    regexp.MustCompile(`^var\s+(\w+)\s*$`),
 	ifStart:         regexp.MustCompile(`^if\s+(.+)$`),
 	ifEnd:           regexp.MustCompile(`^fi$`),
 }
@@ -393,7 +412,7 @@ func (p *Parser) createCheat(path, header, description, command, cheatBlock stri
 	cheat := NewCheat(path, header)
 	cheat.Description = strings.TrimSpace(description)
 	cheat.Command = command
-	cheat.HasCheatBlock = cheatBlock != ""
+	cheat.HasCheatBlock = true // Always true when called from processCheatComment/processCheatBlock
 	cheat.Tags = extractTags(path, header)
 
 	if cheatBlock != "" {
@@ -446,6 +465,16 @@ func parseCheatDSL(cheat *Cheat, content string) {
 
 		if matches := patterns.varDef.FindStringSubmatch(line); matches != nil {
 			cheat.Vars = append(cheat.Vars, ParseVarDefWithCondition(matches[1], matches[2], currentCondition, false))
+			continue
+		}
+
+		// Check for prompt-only var (no assignment)
+		if matches := patterns.varDefPrompt.FindStringSubmatch(line); matches != nil {
+			cheat.Vars = append(cheat.Vars, VarDef{
+				Name:      matches[1],
+				Condition: currentCondition,
+				// Shell and Literal both empty = prompt-only
+			})
 		}
 	}
 }

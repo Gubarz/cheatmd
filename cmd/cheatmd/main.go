@@ -47,6 +47,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringP("output", "o", "", "Output mode: print, copy, exec")
 	rootCmd.PersistentFlags().StringP("query", "q", "", "Initial search query")
+	rootCmd.PersistentFlags().StringP("match", "m", "", "Match command and pre-select if found")
 	rootCmd.PersistentFlags().Bool("print", false, "Print command (shorthand for -o print)")
 	rootCmd.PersistentFlags().Bool("copy", false, "Copy command (shorthand for -o copy)")
 	rootCmd.PersistentFlags().Bool("exec", false, "Execute command (shorthand for -o exec)")
@@ -82,13 +83,12 @@ func bashWidget() string {
 
 _cheatmd_widget() {
    local -r input="${READLINE_LINE}"
-   local -r last_word="${input##* }"
 
    local output
    if [ -z "${input}" ]; then
       output="$(cheatmd --print)"
    else
-      output="$(cheatmd --print --query "$last_word")"
+      output="$(cheatmd --print --match "$input")"
    fi
 
    if [ -n "$output" ]; then
@@ -110,13 +110,12 @@ func zshWidget() string {
 
 _cheatmd_widget() {
    local input="$BUFFER"
-   local last_word="${input##* }"
 
    local output
    if [ -z "$input" ]; then
       output="$(cheatmd --print)"
    else
-      output="$(cheatmd --print --query "$last_word")"
+      output="$(cheatmd --print --match "$input")"
    fi
 
    if [ -n "$output" ]; then
@@ -135,12 +134,11 @@ bindkey '^g' _cheatmd_widget
 func fishWidget() string {
 	return `function _cheatmd_widget
    set -l input (commandline)
-   set -l last_word (commandline -t)
 
    if test -z "$input"
       set output (cheatmd --print)
    else
-      set output (cheatmd --print --query "$last_word")
+      set output (cheatmd --print --match "$input")
    end
 
    if test -n "$output"
@@ -180,6 +178,7 @@ func runCheats(cmd *cobra.Command, args []string) error {
 	}
 
 	query, _ := cmd.Flags().GetString("query")
+	match, _ := cmd.Flags().GetString("match")
 
 	// Resolve path
 	absPath, err := filepath.Abs(path)
@@ -206,6 +205,15 @@ func runCheats(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parse error: %w", err)
 	}
 
+	// Check for duplicate exports
+	if len(index.Duplicates) > 0 {
+		fmt.Fprintln(os.Stderr, "Warning: duplicate exports found:")
+		for _, dup := range index.Duplicates {
+			fmt.Fprintf(os.Stderr, "  export %q defined in:\n    - %s\n    - %s\n", dup.Name, dup.File1, dup.File2)
+		}
+		fmt.Fprintln(os.Stderr)
+	}
+
 	if len(index.Cheats) == 0 {
 		return fmt.Errorf("no cheats found in %s", absPath)
 	}
@@ -214,7 +222,7 @@ func runCheats(cmd *cobra.Command, args []string) error {
 	exec := executor.NewExecutor(index)
 
 	// Run the TUI
-	return ui.Run(index, exec, query)
+	return ui.Run(index, exec, query, match)
 }
 
 func main() {

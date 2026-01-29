@@ -116,6 +116,7 @@ fi
 --header "Title"           # Custom header text
 --delimiter "\t"           # Split lines by delimiter
 --column 2                 # Display specific column
+--select-column 1          # Use specific column
 --map "cut -f1"            # Transform selected value
 ```
 

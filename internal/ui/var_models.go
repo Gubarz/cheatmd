@@ -419,8 +419,16 @@ func SelectWithTUIOptions(varName string, options []string, header, customHeader
 		return "", true, nil
 	}
 
-	// Apply map transform if specified
+	// Apply select-column extraction if specified
 	selected := result.selected
+	if opts.selectColumn > 0 && opts.delimiter != "" {
+		parts := strings.Split(selected, opts.delimiter)
+		if opts.selectColumn <= len(parts) {
+			selected = strings.TrimSpace(parts[opts.selectColumn-1])
+		}
+	}
+
+	// Apply map transform if specified
 	if opts.mapCmd != "" {
 		selected = applyMapTransformCmd(selected, opts.mapCmd)
 	}

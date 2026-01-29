@@ -17,8 +17,8 @@ import (
 // ============================================================================
 
 // Run launches the Bubble Tea TUI interface
-func Run(index *parser.CheatIndex, exec *executor.Executor, initialQuery string) error {
-	return RunTUI(index, exec, initialQuery)
+func Run(index *parser.CheatIndex, exec *executor.Executor, initialQuery, matchCmd string) error {
+	return RunTUI(index, exec, initialQuery, matchCmd)
 }
 
 // ============================================================================
@@ -43,9 +43,16 @@ func resolveAllVariables(cheat *parser.Cheat, index *parser.CheatIndex, exec *ex
 		return false, nil
 	}
 
-	// Pre-fill from environment
+	// Pre-fill from cheat.Scope (populated by --match) or environment
 	for i := range vars {
-		if envVal := os.Getenv(vars[i].def.Name); envVal != "" {
+		varName := vars[i].def.Name
+		// First check if --match pre-filled this var
+		if scopeVal, ok := cheat.Scope[varName]; ok && scopeVal != "" {
+			vars[i].prefill = scopeVal
+			// Don't auto-continue on --match prefills - let user confirm/edit
+			vars[i].skipAutoCont = true
+		} else if envVal := os.Getenv(varName); envVal != "" {
+			// Fall back to environment
 			vars[i].prefill = envVal
 		}
 	}
@@ -165,11 +172,10 @@ func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState 
 		varDefs[v.Name] = append(varDefs[v.Name], v)
 	}
 
-	// Find vars used in the command (quote-aware - only real variable refs)
-	usedVars := findCommandVars(cheat.Command, nil)
+	// Find vars used in the command
+	usedVars := findAllVars(cheat.Command)
 
-	// Find dependencies (transitive closure) - quote-aware for shell commands
-	// but check ALL vars in conditions (conditions are our DSL, not shell)
+	// Find dependencies (transitive closure)
 	allNeeded := make(map[string]bool)
 	queue := make([]string, len(usedVars))
 	copy(queue, usedVars)
@@ -185,28 +191,22 @@ func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState 
 
 		// Check all variants of this var for dependencies
 		for _, def := range varDefs[varName] {
-			// Shell commands: use quote-aware parsing (vars in single quotes are literal)
 			if def.Shell != "" {
-				deps := findCommandVars(def.Shell, nil)
-				for _, dep := range deps {
+				for _, dep := range findAllVars(def.Shell) {
 					if !allNeeded[dep] {
 						queue = append(queue, dep)
 					}
 				}
 			}
-			// Literal values: all $vars are references (our DSL, not shell)
 			if def.Literal != "" {
-				deps := findAllVars(def.Literal)
-				for _, dep := range deps {
+				for _, dep := range findAllVars(def.Literal) {
 					if !allNeeded[dep] {
 						queue = append(queue, dep)
 					}
 				}
 			}
-			// Conditions: use findAllVars (our DSL, not shell - all $vars are refs)
 			if def.Condition != "" {
-				deps := findAllVars(def.Condition)
-				for _, dep := range deps {
+				for _, dep := range findAllVars(def.Condition) {
 					if !allNeeded[dep] {
 						queue = append(queue, dep)
 					}
@@ -232,7 +232,7 @@ func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState 
 		// Check all variants for dependencies
 		for _, def := range varDefs[varName] {
 			if def.Shell != "" {
-				for _, dep := range findCommandVars(def.Shell, nil) {
+				for _, dep := range findAllVars(def.Shell) {
 					addWithDeps(dep)
 				}
 			}
@@ -256,7 +256,8 @@ func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState 
 		addWithDeps(v)
 	}
 
-	// Build final list - store all variants for each var
+	// Build final list - only include vars that have definitions
+	// Undefined vars (like $i in a bash loop) are left for the shell
 	var vars []varState
 	for _, varName := range orderedVars {
 		if defs, ok := varDefs[varName]; ok && len(defs) > 0 {
@@ -264,11 +265,8 @@ func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState 
 				def:      defs[0], // Primary definition
 				variants: defs,    // All conditional variants
 			})
-		} else {
-			vars = append(vars, varState{
-				def: parser.VarDef{Name: varName, Shell: ""},
-			})
 		}
+		// Skip undefined vars - they're shell variables (like $i in loops)
 	}
 
 	return vars
@@ -456,15 +454,16 @@ func resolveVar(v parser.VarDef, scope map[string]string, exec *executor.Executo
 
 // selectorOptions holds parsed selector arguments
 type selectorOptions struct {
-	header    string
-	delimiter string
-	column    int    // 1-indexed, 0 means all columns
-	mapCmd    string // command to transform selected value
+	header       string
+	delimiter    string
+	column       int    // 1-indexed, 0 means all columns (display column)
+	selectColumn int    // 1-indexed, 0 means use column or full line (return column)
+	mapCmd       string // command to transform selected value
 }
 
 // parseSelectorOptions parses all selector arguments
 func parseSelectorOptions(selectorArgs string) selectorOptions {
-	opts := selectorOptions{column: 0} // default: show all
+	opts := selectorOptions{column: 0, selectColumn: 0} // default: show all
 	if selectorArgs == "" {
 		return opts
 	}
@@ -485,6 +484,11 @@ func parseSelectorOptions(selectorArgs string) selectorOptions {
 		case "--column":
 			if i+1 < len(args) {
 				fmt.Sscanf(args[i+1], "%d", &opts.column)
+				i++
+			}
+		case "--select-column":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &opts.selectColumn)
 				i++
 			}
 		case "--map":
@@ -607,59 +611,6 @@ func findAllVars(cmd string) []string {
 	return vars
 }
 
-// findCommandVars finds $varname patterns that will be expanded by shell.
-// Ignores variables inside single quotes (literal strings in shell).
-// Used for determining execution order (what vars a command needs before running).
-func findCommandVars(cmd string, scope map[string]string) []string {
-	var vars []string
-	seen := make(map[string]bool)
-	inSingleQuote := false
-	inDoubleQuote := false
-
-	for i := 0; i < len(cmd); i++ {
-		c := cmd[i]
-
-		// Track quote state (handle escapes)
-		if c == '\\' && i+1 < len(cmd) {
-			i++ // Skip escaped char
-			continue
-		}
-		if c == '\'' && !inDoubleQuote {
-			inSingleQuote = !inSingleQuote
-			continue
-		}
-		if c == '"' && !inSingleQuote {
-			inDoubleQuote = !inDoubleQuote
-			continue
-		}
-
-		// Skip variables inside single quotes - they're literal
-		if inSingleQuote {
-			continue
-		}
-
-		if c != '$' || i+1 >= len(cmd) {
-			continue
-		}
-
-		j := i + 1
-		for j < len(cmd) && isVarChar(cmd[j], j == i+1) {
-			j++
-		}
-
-		if j > i+1 {
-			varName := cmd[i+1 : j]
-			if !seen[varName] && (scope == nil || scope[varName] == "") {
-				vars = append(vars, varName)
-				seen[varName] = true
-			}
-		}
-		i = j - 1
-	}
-
-	return vars
-}
-
 // splitLines splits text into non-empty trimmed lines
 func splitLines(s string) []string {
 	var lines []string
@@ -718,8 +669,17 @@ func parseShellArgs(s string) []string {
 	return args
 }
 
-// applyMapTransform runs the map command on the selected value
+// applyMapTransform transforms the selected value based on options
 func applyMapTransform(value string, opts selectorOptions) string {
+	// Apply select-column extraction first
+	if opts.selectColumn > 0 && opts.delimiter != "" {
+		parts := strings.Split(value, opts.delimiter)
+		if opts.selectColumn <= len(parts) {
+			value = strings.TrimSpace(parts[opts.selectColumn-1])
+		}
+	}
+
+	// Then apply map command if present
 	if opts.mapCmd == "" {
 		return value
 	}
