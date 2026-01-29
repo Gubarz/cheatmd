@@ -367,7 +367,7 @@ func (p *Parser) processCheatComment(path string, s *parseState, content string)
 	}
 	lastIdx := len(s.pendingCodeBlocks) - 1
 	block := s.pendingCodeBlocks[lastIdx]
-	cheat := p.createCheat(path, s.currentHeader, block.description, block.content, content)
+	cheat := p.createCheat(path, s.currentHeader, block.description, block.content, content, true)
 	p.index.AddCheat(cheat)
 	p.index.RegisterModule(cheat)
 	s.pendingCodeBlocks = s.pendingCodeBlocks[:lastIdx]
@@ -380,13 +380,13 @@ func (p *Parser) processCheatBlock(path string, s *parseState) {
 	if len(s.pendingCodeBlocks) > 0 {
 		lastIdx := len(s.pendingCodeBlocks) - 1
 		block := s.pendingCodeBlocks[lastIdx]
-		cheat := p.createCheat(path, s.currentHeader, block.description, block.content, content)
+		cheat := p.createCheat(path, s.currentHeader, block.description, block.content, content, true)
 		p.index.AddCheat(cheat)
 		p.index.RegisterModule(cheat)
 		s.pendingCodeBlocks = s.pendingCodeBlocks[:lastIdx]
 	} else {
 		// Standalone cheat block (module definition)
-		cheat := p.createCheat(path, s.currentHeader, "", "", content)
+		cheat := p.createCheat(path, s.currentHeader, "", "", content, true)
 		if cheat.Export != "" {
 			p.index.RegisterModule(cheat)
 		}
@@ -397,7 +397,7 @@ func (p *Parser) processCheatBlock(path string, s *parseState) {
 func (p *Parser) processPendingBlocks(path, header string, blocks []codeBlock) {
 	for _, block := range blocks {
 		if IsShellLanguage(block.lang) && block.content != "" {
-			cheat := p.createCheat(path, header, block.description, block.content, "")
+			cheat := p.createCheat(path, header, block.description, block.content, "", false)
 			p.index.AddCheat(cheat)
 		}
 	}
@@ -408,11 +408,11 @@ func (p *Parser) processPendingBlocks(path, header string, blocks []codeBlock) {
 // ============================================================================
 
 // createCheat creates a new cheat from parsed data
-func (p *Parser) createCheat(path, header, description, command, cheatBlock string) *Cheat {
+func (p *Parser) createCheat(path, header, description, command, cheatBlock string, hasCheatBlock bool) *Cheat {
 	cheat := NewCheat(path, header)
 	cheat.Description = strings.TrimSpace(description)
 	cheat.Command = command
-	cheat.HasCheatBlock = true // Always true when called from processCheatComment/processCheatBlock
+	cheat.HasCheatBlock = hasCheatBlock
 	cheat.Tags = extractTags(path, header)
 
 	if cheatBlock != "" {
