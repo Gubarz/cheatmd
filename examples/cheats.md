@@ -4,9 +4,7 @@ Simple examples demonstrating cheatmd features.
 
 ## Git: checkout branch
 
-> Switch to an existing branch.
-
-```sh
+```sh title:"Switch to an existing branch."
 git checkout $branch
 ```
 <!-- cheat
@@ -15,9 +13,7 @@ import git_branch
 
 ## Git: delete branch
 
-> Delete a local branch.
-
-```sh
+```sh title:"Delete a local branch."
 git branch -d $branch
 ```
 <!-- cheat
@@ -26,9 +22,7 @@ import git_branch
 
 ## Docker: exec into container
 
-> Open a shell in a running container.
-
-```sh
+```sh title:"Open a shell in a running container."
 docker exec -it $container /bin/sh
 ```
 <!-- cheat
@@ -37,9 +31,7 @@ import docker_container
 
 ## Docker: view logs
 
-> Follow logs from a container.
-
-```sh
+```sh title:"Follow logs from a container."
 docker logs -f $container
 ```
 <!-- cheat
@@ -48,9 +40,7 @@ import docker_container
 
 ## Kubernetes: get pods
 
-> List pods in a namespace.
-
-```sh
+```sh title:"List pods in a namespace."
 kubectl get pods -n $namespace --context $context
 ```
 <!-- cheat
@@ -59,9 +49,7 @@ import kube_context
 
 ## Files: find by name
 
-> Find files matching a pattern.
-
-```sh
+```sh title:"Find files matching a pattern."
 find $dir -name "$pattern"
 ```
 <!-- cheat
@@ -71,9 +59,7 @@ var pattern = echo "" --- --header "File pattern (e.g., *.txt)"
 
 ## Archive: extract tar
 
-> Extract a tar archive.
-
-```sh
+```sh title:"Extract a tar archive."
 tar -xvf $file -C $dest
 ```
 <!-- cheat

@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var version = "0.1.0"
+var version = "0.1.1"
 
 var widgetCmd = &cobra.Command{
 	Use:   "widget [shell]",
@@ -34,8 +34,8 @@ var rootCmd = &cobra.Command{
 	Short: "Executable Markdown Cheatsheets",
 	Long: `Command cheatsheet tool that uses real Markdown files.
 
-Browse your cheatsheets with fuzzy search, select commands,
-fill in variables interactively, and execute or copy the result.`,
+Browse your cheatsheets interactively, select commands,
+fill in variables, and execute or copy the result.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runCheats,
 }
@@ -50,6 +50,7 @@ func init() {
 	rootCmd.PersistentFlags().Bool("print", false, "Print command (shorthand for -o print)")
 	rootCmd.PersistentFlags().Bool("copy", false, "Copy command (shorthand for -o copy)")
 	rootCmd.PersistentFlags().Bool("exec", false, "Execute command (shorthand for -o exec)")
+	rootCmd.PersistentFlags().Bool("auto", false, "Auto-select if query matches exactly one result")
 
 	viper.BindPFlag("output", rootCmd.PersistentFlags().Lookup("output"))
 }
@@ -79,19 +80,15 @@ func runWidget(cmd *cobra.Command, args []string) error {
 func bashWidget() string {
 	return `#!/usr/bin/env bash
 
-_cheatmd_call() {
-   local result="$(cheatmd "$@" </dev/tty)"
-   printf "%s" "$result"
-}
-
 _cheatmd_widget() {
    local -r input="${READLINE_LINE}"
    local -r last_word="${input##* }"
 
+   local output
    if [ -z "${input}" ]; then
-      local -r output="$(_cheatmd_call --print)"
+      output="$(cheatmd --print)"
    else
-      local -r output="$(_cheatmd_call --print --query "$last_word")"
+      output="$(cheatmd --print --query "$last_word")"
    fi
 
    if [ -n "$output" ]; then
@@ -100,12 +97,8 @@ _cheatmd_widget() {
    fi
 }
 
-_cheatmd_widget_legacy() {
-   _cheatmd_call --print
-}
-
 if [ ${BASH_VERSION:0:1} -lt 4 ]; then
-   bind '"\C-g": " \C-b\C-k \C-u` + "`" + `_cheatmd_widget_legacy` + "`" + `\e\C-e\C-a\C-y\C-h\C-e\e \C-y\ey\C-x\C-x\C-f"'
+   echo "cheatmd widget requires bash 4+" >&2
 else
    bind -x '"\C-g": _cheatmd_widget'
 fi
@@ -115,19 +108,15 @@ fi
 func zshWidget() string {
 	return `#!/usr/bin/env zsh
 
-_cheatmd_call() {
-   local result="$(cheatmd "$@" </dev/tty)"
-   printf "%s" "$result"
-}
-
 _cheatmd_widget() {
    local input="$BUFFER"
    local last_word="${input##* }"
 
+   local output
    if [ -z "$input" ]; then
-      local output="$(_cheatmd_call --print)"
+      output="$(cheatmd --print)"
    else
-      local output="$(_cheatmd_call --print --query "$last_word")"
+      output="$(cheatmd --print --query "$last_word")"
    fi
 
    if [ -n "$output" ]; then
@@ -135,7 +124,7 @@ _cheatmd_widget() {
       CURSOR=${#BUFFER}
    fi
 
-   zle redisplay
+   zle reset-prompt
 }
 
 zle -N _cheatmd_widget
@@ -149,15 +138,17 @@ func fishWidget() string {
    set -l last_word (commandline -t)
 
    if test -z "$input"
-      set -l output (cheatmd --print)
+      set output (cheatmd --print)
    else
-      set -l output (cheatmd --print --query "$last_word")
+      set output (cheatmd --print --query "$last_word")
    end
 
    if test -n "$output"
       commandline -r "$output"
       commandline -f end-of-line
    end
+
+   commandline -f repaint
 end
 
 bind \cg _cheatmd_widget
@@ -182,6 +173,10 @@ func runCheats(cmd *cobra.Command, args []string) error {
 		config.SetOutput("exec")
 	} else if o, _ := cmd.Flags().GetString("output"); o != "" {
 		config.SetOutput(o)
+	}
+
+	if auto, _ := cmd.Flags().GetBool("auto"); auto {
+		config.SetAutoSelect(true)
 	}
 
 	query, _ := cmd.Flags().GetString("query")
@@ -218,7 +213,7 @@ func runCheats(cmd *cobra.Command, args []string) error {
 	// Create executor
 	exec := executor.NewExecutor(index)
 
-	// Run the fzf-based UI
+	// Run the TUI
 	return ui.Run(index, exec, query)
 }
 

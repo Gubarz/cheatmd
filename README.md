@@ -8,8 +8,6 @@ Executable Markdown cheatsheets. Write readable docs, run interactive commands.
 go install github.com/gubarz/cheatmd/cmd/cheatmd@latest
 ```
 
-Requires [fzf](https://github.com/junegunn/fzf).
-
 ## Quick Start
 
 ```bash
@@ -34,9 +32,7 @@ Press `Ctrl+G` to open the selector.
 ```markdown
 ## Docker: list containers
 
-> Show all running containers.
-
-` ` `sh
+` ` `sh title:"Show all running containers"
 docker ps
 ` ` `
 ```
@@ -46,26 +42,18 @@ docker ps
 ```markdown
 ## Docker: exec into container
 
-` ` `sh
+` ` `sh title:"Execute shell in container"
 docker exec -it $container /bin/sh
 ` ` `
 <!-- cheat
-var container = docker ps --format "{{.Names}}"
+var container = docker ps --format "{{.Names}}" --- --header "Select container"
 -->
 ```
 
 Variables are populated from shell command output:
 - **0 lines** → manual input prompt
 - **1 line** → pre-filled, confirm with Enter
-- **2+ lines** → fzf selection
-
-### Custom Headers
-
-```markdown
-<!-- cheat
-var branch = git branch --format="%(refname:short)" --- --header "Select branch"
--->
-```
+- **2+ lines** → selection list
 
 ### Modules
 
@@ -83,7 +71,7 @@ Import them elsewhere:
 ```markdown
 ## Docker: view logs
 
-` ` `sh
+` ` `sh title:"Follow container logs"
 docker logs -f $container
 ` ` `
 <!-- cheat
@@ -106,7 +94,7 @@ require_cheat_block: false
 
 ```
 var <name> = <shell>               # Variable from shell output
-var <name> = <shell> --- <fzf>     # With fzf options
+var <name> = <shell> --- <opts>    # With options (e.g. --header "Title")
 export <name>                      # Make module importable
 import <name>                      # Use exported module
 ```
