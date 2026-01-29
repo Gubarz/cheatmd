@@ -12,14 +12,14 @@ shell: /bin/bash
 
 # UI colors (256-color palette or hex)
 # See: https://www.ditig.com/256-colors-cheat-sheet
-color_header: "36"     # Cyan for headers
-color_command: "32"    # Green for commands  
-color_desc: "90"       # Gray for descriptions
-color_path: "33"       # Yellow for file paths
-color_border: "240"    # Dark gray for borders/dividers
-color_cursor: "212"    # Pink for cursor/selection indicator
-color_selected: "236"  # Dark background for selected line
-color_dim: "241"       # Dimmed text
+color_header: "#cad2e2"     # htb heading for headers
+color_command: "#9fef00"    # htb lime for commands
+color_desc: "#a4b1cd"       # htb text color for descriptions
+color_path: "#5cb2ff"       # htb blue code color for file paths
+color_border: "#1a2332"     # htb divider color
+color_cursor: "#ff8484"     # htb red for for cursor/selection indicator
+color_selected: "#1a2331"   # htb dark background for selected line
+color_dim: "#4a5466"        # htb border color for dimmed text
 
 # Column widths (max characters)
 column_header: 40
