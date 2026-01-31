@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -29,6 +31,7 @@ type varSelectModel struct {
 	displayOpts  []string // what to display (may be transformed by delimiter/column)
 	filtered     []filteredOption
 	cursor       int
+	offset       int // viewport scroll offset
 	textInput    textinput.Model
 	width        int
 	height       int
@@ -40,13 +43,9 @@ type varSelectModel struct {
 
 // filteredOption pairs display text with original value
 type filteredOption struct {
-	display  string
-	original string
-}
-
-// newVarSelectModel creates a new variable selection model
-func newVarSelectModel(varName string, options []string, header, customHeader, prefill, filePath string) varSelectModel {
-	return newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, filePath, SelectOptions{})
+	display    string
+	original   string
+	searchText string // pre-lowercased for fast filtering
 }
 
 // newVarSelectModelWithOpts creates a variable selection model with display options
@@ -61,25 +60,21 @@ func newVarSelectModelWithOpts(varName string, options []string, header, customH
 		ti.SetValue(prefill)
 	}
 
-	// Build filtered options with display text
-	filtered := make([]filteredOption, len(options))
-	for i, opt := range options {
-		filtered[i] = filteredOption{
-			display:  getDisplayColumn(opt, opts.Delimiter, opts.Column),
-			original: opt,
-		}
-	}
-
-	return varSelectModel{
+	m := varSelectModel{
 		varName:      varName,
 		header:       header,
 		customHeader: customHeader,
 		options:      options,
-		filtered:     filtered,
+		filtered:     nil, // Will be populated lazily
 		textInput:    ti,
 		selectOpts:   opts,
 		filePath:     filePath,
 	}
+
+	// Initial filter (builds filtered list)
+	m.filterOptions()
+
+	return m
 }
 
 // getDisplayColumn extracts the display column from a line
@@ -161,11 +156,17 @@ func (m *varSelectModel) moveCursor(delta int) {
 // filterOptions filters options based on the input query
 func (m *varSelectModel) filterOptions() {
 	query := strings.TrimSpace(strings.ToLower(m.textInput.Value()))
+	const maxResults = 1000 // Limit results for performance
 
 	if query == "" {
-		// No filter - show all options
-		m.filtered = make([]filteredOption, len(m.options))
-		for i, opt := range m.options {
+		// No filter - show first maxResults options (lazy)
+		limit := len(m.options)
+		if limit > maxResults {
+			limit = maxResults
+		}
+		m.filtered = make([]filteredOption, limit)
+		for i := 0; i < limit; i++ {
+			opt := m.options[i]
 			m.filtered[i] = filteredOption{
 				display:  getDisplayColumn(opt, m.selectOpts.Delimiter, m.selectOpts.Column),
 				original: opt,
@@ -173,15 +174,17 @@ func (m *varSelectModel) filterOptions() {
 		}
 	} else {
 		words := strings.Fields(query)
-		m.filtered = make([]filteredOption, 0, len(m.options))
+		m.filtered = make([]filteredOption, 0, maxResults)
 		for _, opt := range m.options {
-			display := getDisplayColumn(opt, m.selectOpts.Delimiter, m.selectOpts.Column)
-			// Match against both display and original
-			if matchesAllWords(strings.ToLower(display), words) || matchesAllWords(strings.ToLower(opt), words) {
+			optLower := strings.ToLower(opt)
+			if matchesAllWords(optLower, words) {
 				m.filtered = append(m.filtered, filteredOption{
-					display:  display,
+					display:  getDisplayColumn(opt, m.selectOpts.Delimiter, m.selectOpts.Column),
 					original: opt,
 				})
+				if len(m.filtered) >= maxResults {
+					break
+				}
 			}
 		}
 	}
@@ -231,14 +234,14 @@ func (m varSelectModel) renderHeader() string {
 }
 
 // renderBottom renders the options list and input
-func (m varSelectModel) renderBottom(width int) string {
+func (m *varSelectModel) renderBottom(width int) string {
 	var b strings.Builder
 	b.WriteString(styles.Divider.Render(strings.Repeat("─", width)))
 	b.WriteString("\n")
 
 	// Options list
 	listHeight := minInt(10, len(m.filtered))
-	start, end := scrollWindow(m.cursor, len(m.filtered), listHeight)
+	start, end := scrollWindow(m.cursor, len(m.filtered), listHeight, &m.offset)
 
 	for i := start; i < end; i++ {
 		opt := m.filtered[i]
@@ -405,8 +408,23 @@ func SelectWithTUI(varName string, options []string, header, customHeader, prefi
 // SelectWithTUIOptions displays options for variable selection with display options
 // Returns (value, goBack, error) - if value is "__EXIT__" caller should exit completely
 func SelectWithTUIOptions(varName string, options []string, header, customHeader, prefill, filePath string, opts selectorOptions) (string, bool, error) {
+	debug := os.Getenv("CHEATMD_DEBUG") != ""
+	var start time.Time
+
+	if debug {
+		start = time.Now()
+	}
 	ttyIn, ttyOut, cleanup := getTTY()
+	if debug {
+		os.Stderr.WriteString("[DEBUG] getTTY: " + time.Since(start).String() + "\n")
+		start = time.Now()
+	}
+
 	RefreshStyles() // Refresh after getTTY sets up the renderer
+	if debug {
+		os.Stderr.WriteString("[DEBUG] RefreshStyles: " + time.Since(start).String() + "\n")
+		start = time.Now()
+	}
 	defer cleanup()
 
 	selectOpts := SelectOptions{
@@ -416,9 +434,21 @@ func SelectWithTUIOptions(varName string, options []string, header, customHeader
 	}
 
 	m := newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, filePath, selectOpts)
+	if debug {
+		os.Stderr.WriteString("[DEBUG] newVarSelectModel: " + time.Since(start).String() + "\n")
+		start = time.Now()
+	}
+
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(ttyOut), tea.WithInput(ttyIn))
+	if debug {
+		os.Stderr.WriteString("[DEBUG] NewProgram: " + time.Since(start).String() + "\n")
+		start = time.Now()
+	}
 
 	finalModel, err := p.Run()
+	if debug {
+		os.Stderr.WriteString("[DEBUG] Run: " + time.Since(start).String() + "\n")
+	}
 	if err != nil {
 		return "", false, err
 	}

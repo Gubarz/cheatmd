@@ -1,12 +1,57 @@
 package parser
 
 import (
-	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 )
+
+// ============================================================================
+// String Interner - reduces memory by deduplicating strings
+// ============================================================================
+
+// stringInterner provides string deduplication (interning)
+type stringInterner struct {
+	mu      sync.RWMutex
+	strings map[string]string
+}
+
+func newStringInterner() *stringInterner {
+	return &stringInterner{
+		strings: make(map[string]string, 1024),
+	}
+}
+
+// Intern returns a canonical version of the string
+// If the string was seen before, returns the previously stored instance
+func (si *stringInterner) Intern(s string) string {
+	if s == "" {
+		return ""
+	}
+	si.mu.RLock()
+	if interned, ok := si.strings[s]; ok {
+		si.mu.RUnlock()
+		return interned
+	}
+	si.mu.RUnlock()
+
+	si.mu.Lock()
+	// Double-check after acquiring write lock
+	if interned, ok := si.strings[s]; ok {
+		si.mu.Unlock()
+		return interned
+	}
+	si.strings[s] = s
+	si.mu.Unlock()
+	return s
+}
+
+// Global interner for file paths and common strings
+var pathInterner = newStringInterner()
 
 // ============================================================================
 // Domain Types
@@ -26,12 +71,12 @@ type Cheat struct {
 	HasCheatBlock bool              // Whether this cheat has a <!-- cheat --> block
 }
 
-// NewCheat creates a new Cheat with initialized scope
+// NewCheat creates a new Cheat
 func NewCheat(file, header string) *Cheat {
 	return &Cheat{
-		File:   file,
+		File:   pathInterner.Intern(file),
 		Header: header,
-		Scope:  make(map[string]string),
+		// Scope allocated lazily at runtime when needed
 	}
 }
 
@@ -179,15 +224,15 @@ var patterns = struct {
 	ifEnd:           regexp.MustCompile(`^fi$`),
 }
 
-// shellLanguages defines which code block languages are treated as shell
-var shellLanguages = map[string]bool{
-	"": true, "sh": true, "shell": true, "bash": true,
-	"zsh": true, "fish": true, "console": true,
-}
-
 // IsShellLanguage returns true if the language is a shell language
 func IsShellLanguage(lang string) bool {
-	return shellLanguages[strings.ToLower(lang)]
+	lang = strings.ToLower(lang)
+	// Exclude diagrams or data formats that would choke on $variable injection
+	if lang == "mermaid" || lang == "dot" || lang == "chart" {
+		return false
+	}
+	// Everything else is likely a script or a command snippet
+	return true
 }
 
 // ============================================================================
@@ -196,49 +241,152 @@ func IsShellLanguage(lang string) bool {
 
 // Parser handles markdown file parsing
 type Parser struct {
-	index *CheatIndex
+	index         *CheatIndex
+	pathTagsCache map[string][]string // cache tags per directory
 }
 
 // NewParser creates a new parser
 func NewParser() *Parser {
 	return &Parser{
-		index: NewCheatIndex(),
+		index:         NewCheatIndex(),
+		pathTagsCache: make(map[string][]string),
 	}
 }
 
 // ParseDirectory recursively parses all markdown files in a directory
 func (p *Parser) ParseDirectory(dir string) (*CheatIndex, error) {
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && isMarkdownFile(path) {
-			return p.parseFile(path)
-		}
-		return nil
-	})
+	files, err := collectMarkdownFiles(dir)
 	if err != nil {
 		return nil, err
 	}
+
+	results := parseFilesParallel(files)
+	p.mergeResults(results)
+
 	return p.index, nil
+}
+
+// collectMarkdownFiles walks dir and returns all .md file paths
+func collectMarkdownFiles(dir string) ([]string, error) {
+	files := make([]string, 0, 4096)
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && isMarkdownFile(path) {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
+}
+
+// parseResult holds the output from parsing a batch of files
+type parseResult struct {
+	cheats  []*Cheat
+	modules map[string]*Module
+}
+
+// parseFilesParallel reads and parses files using a two-stage pipeline
+func parseFilesParallel(files []string) []parseResult {
+	numWorkers := runtime.NumCPU()
+	numFiles := len(files)
+	estimatedCheats := max(numFiles*35, 1000)
+
+	// Stage 1: Parallel I/O - read raw bytes
+	type fileData struct {
+		path string
+		data []byte
+	}
+	fileDataChan := make(chan fileData, numFiles)
+	fileChan := make(chan string, numFiles)
+
+	var ioWg sync.WaitGroup
+	ioWorkers := min(numWorkers*2, numFiles)
+	for w := 0; w < ioWorkers; w++ {
+		ioWg.Add(1)
+		go func() {
+			defer ioWg.Done()
+			for path := range fileChan {
+				if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+					fileDataChan <- fileData{path: path, data: data}
+				}
+			}
+		}()
+	}
+
+	go func() {
+		for _, path := range files {
+			fileChan <- path
+		}
+		close(fileChan)
+		ioWg.Wait()
+		close(fileDataChan)
+	}()
+
+	// Stage 2: Parallel parsing - parse from raw bytes
+	resultChan := make(chan parseResult, numWorkers)
+	var parseWg sync.WaitGroup
+
+	for w := 0; w < numWorkers; w++ {
+		parseWg.Add(1)
+		go func() {
+			defer parseWg.Done()
+			localParser := NewParser()
+			localCheats := make([]*Cheat, 0, estimatedCheats/numWorkers)
+			localModules := make(map[string]*Module)
+
+			for fd := range fileDataChan {
+				localParser.index = NewCheatIndex()
+				localParser.parseLines(fd.path, fd.data)
+				localCheats = append(localCheats, localParser.index.Cheats...)
+				for name, mod := range localParser.index.Modules {
+					localModules[name] = mod
+				}
+			}
+			resultChan <- parseResult{cheats: localCheats, modules: localModules}
+		}()
+	}
+
+	go func() {
+		parseWg.Wait()
+		close(resultChan)
+	}()
+
+	var results []parseResult
+	for r := range resultChan {
+		results = append(results, r)
+	}
+	return results
+}
+
+// mergeResults combines parse results into the parser's index
+func (p *Parser) mergeResults(results []parseResult) {
+	var totalCheats []*Cheat
+	for _, r := range results {
+		totalCheats = append(totalCheats, r.cheats...)
+		for name, mod := range r.modules {
+			if existing, ok := p.index.Modules[name]; ok {
+				p.index.Duplicates = append(p.index.Duplicates, DuplicateExport{
+					Name:  name,
+					File1: existing.File,
+					File2: mod.File,
+				})
+			}
+			p.index.Modules[name] = mod
+		}
+	}
+	p.index.Cheats = totalCheats
 }
 
 // ParseSingleFile parses a single markdown file
 func (p *Parser) ParseSingleFile(path string) (*CheatIndex, error) {
-	if err := p.parseFile(path); err != nil {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return nil, err
 	}
+	p.parseLines(path, data)
 	return p.index, nil
-}
-
-// parseFile reads and parses a single file
-func (p *Parser) parseFile(path string) error {
-	lines, err := readFileLines(path)
-	if err != nil {
-		return err
-	}
-	p.parseLines(path, lines)
-	return nil
 }
 
 // ============================================================================
@@ -251,9 +399,9 @@ type parseState struct {
 	inCodeBlock       bool
 	codeBlockLang     string
 	codeBlockDesc     string
-	codeBlockContent  strings.Builder
+	codeBlockBuf      []byte // direct byte buffer, no Builder overhead
 	inCheatBlock      bool
-	cheatBlockContent strings.Builder
+	cheatBlockBuf     []byte
 	pendingCodeBlocks []codeBlock
 }
 
@@ -267,97 +415,265 @@ type codeBlock struct {
 // reset clears pending blocks and updates header
 func (s *parseState) reset(newHeader string) {
 	s.currentHeader = newHeader
-	s.pendingCodeBlocks = nil
+	s.pendingCodeBlocks = s.pendingCodeBlocks[:0]
+}
+
+// parseStatePool reduces allocations by reusing parseState objects
+var parseStatePool = sync.Pool{
+	New: func() interface{} {
+		return &parseState{
+			pendingCodeBlocks: make([]codeBlock, 0, 8),
+			codeBlockBuf:      make([]byte, 0, 512),
+			cheatBlockBuf:     make([]byte, 0, 256),
+		}
+	},
+}
+
+func getParseState() *parseState {
+	s := parseStatePool.Get().(*parseState)
+	s.currentHeader = ""
+	s.inCodeBlock = false
+	s.codeBlockLang = ""
+	s.codeBlockDesc = ""
+	s.codeBlockBuf = s.codeBlockBuf[:0]
+	s.inCheatBlock = false
+	s.cheatBlockBuf = s.cheatBlockBuf[:0]
+	s.pendingCodeBlocks = s.pendingCodeBlocks[:0]
+	return s
+}
+
+func putParseState(s *parseState) {
+	// Cap buffer sizes to prevent memory bloat in pool
+	if cap(s.codeBlockBuf) > 64*1024 {
+		s.codeBlockBuf = make([]byte, 0, 512)
+	}
+	if cap(s.cheatBlockBuf) > 16*1024 {
+		s.cheatBlockBuf = make([]byte, 0, 256)
+	}
+	parseStatePool.Put(s)
 }
 
 // ============================================================================
 // Line Parsing
 // ============================================================================
 
-// parseLines processes all lines in a file
-func (p *Parser) parseLines(path string, lines []string) {
-	state := &parseState{}
+// parseLines processes all lines in a file from raw bytes
+func (p *Parser) parseLines(path string, data []byte) {
+	state := getParseState()
+	defer putParseState(state)
 
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		p.parseLine(path, line, state)
+	// Process line by line without allocating []string
+	start := 0
+	for i := 0; i <= len(data); i++ {
+		if i == len(data) || data[i] == '\n' {
+			end := i
+			if end > start && data[end-1] == '\r' {
+				end--
+			}
+			p.parseLine(path, data[start:end], state)
+			start = i + 1
+		}
 	}
 
 	// Process remaining pending blocks
 	p.processPendingBlocks(path, state.currentHeader, state.pendingCodeBlocks)
 }
 
-// parseLine processes a single line
-func (p *Parser) parseLine(path, line string, s *parseState) {
-	// Header - starts new section
-	if !s.inCodeBlock && !s.inCheatBlock {
-		if matches := patterns.header.FindStringSubmatch(line); matches != nil {
-			p.processPendingBlocks(path, s.currentHeader, s.pendingCodeBlocks)
-			s.reset(matches[2])
-			return
-		}
-	}
-
-	// Single-line cheat comment
-	if !s.inCodeBlock {
-		if matches := patterns.cheatSingleLine.FindStringSubmatch(line); matches != nil {
-			p.processCheatComment(path, s, matches[1])
-			return
-		}
-	}
-
-	// Multi-line cheat block start
-	if !s.inCodeBlock && patterns.cheatStart.MatchString(line) {
-		s.inCheatBlock = true
-		s.cheatBlockContent.Reset()
-		return
-	}
-
-	// Multi-line cheat block end
-	if s.inCheatBlock && patterns.cheatEnd.MatchString(line) {
-		s.inCheatBlock = false
-		p.processCheatBlock(path, s)
-		return
-	}
-
-	// Inside cheat block
-	if s.inCheatBlock {
-		s.cheatBlockContent.WriteString(line + "\n")
-		return
-	}
-
-	// Code block start
-	if !s.inCodeBlock {
-		if matches := patterns.codeBlockStart.FindStringSubmatch(line); matches != nil {
-			s.inCodeBlock = true
-			s.codeBlockLang = matches[1]
-			s.codeBlockDesc = ""
-			if len(matches) > 2 {
-				s.codeBlockDesc = matches[2]
-			}
-			s.codeBlockContent.Reset()
-			return
-		}
-	}
-
-	// Code block end
-	if s.inCodeBlock && line == "```" {
-		s.inCodeBlock = false
-		content := strings.TrimSpace(s.codeBlockContent.String())
-		if content != "" {
-			s.pendingCodeBlocks = append(s.pendingCodeBlocks, codeBlock{
-				lang:        s.codeBlockLang,
-				content:     content,
-				description: s.codeBlockDesc,
-			})
-		}
-		return
-	}
-
-	// Inside code block
+// parseLine processes a single line (as bytes, no allocation)
+func (p *Parser) parseLine(path string, line []byte, s *parseState) {
+	// Fast path: inside code block - just accumulate
 	if s.inCodeBlock {
-		s.codeBlockContent.WriteString(line + "\n")
+		if len(line) == 3 && line[0] == '`' && line[1] == '`' && line[2] == '`' {
+			s.inCodeBlock = false
+			content := trimSpaceBytes(s.codeBlockBuf)
+			if len(content) > 0 {
+				s.pendingCodeBlocks = append(s.pendingCodeBlocks, codeBlock{
+					lang:        s.codeBlockLang,
+					content:     string(content),
+					description: s.codeBlockDesc,
+				})
+			}
+			return
+		}
+		s.codeBlockBuf = append(s.codeBlockBuf, line...)
+		s.codeBlockBuf = append(s.codeBlockBuf, '\n')
+		return
 	}
+
+	// Fast path: inside cheat block - just accumulate
+	if s.inCheatBlock {
+		// Fast check: cheat end is "-->" possibly with whitespace
+		if len(line) >= 2 && line[0] == '-' && line[1] == '-' {
+			if isCheatEnd(line) {
+				s.inCheatBlock = false
+				p.processCheatBlock(path, s)
+				return
+			}
+		}
+		s.cheatBlockBuf = append(s.cheatBlockBuf, line...)
+		s.cheatBlockBuf = append(s.cheatBlockBuf, '\n')
+		return
+	}
+
+	// Quick character checks before expensive operations
+	if len(line) == 0 {
+		return
+	}
+
+	first := line[0]
+
+	// Header - starts with #
+	if first == '#' {
+		if header, ok := parseHeader(line); ok {
+			p.processPendingBlocks(path, s.currentHeader, s.pendingCodeBlocks)
+			s.reset(header)
+			return
+		}
+	}
+
+	// Code block start - starts with ```
+	if first == '`' && len(line) >= 3 && line[1] == '`' && line[2] == '`' {
+		if lang, desc, ok := parseCodeBlockStart(line); ok {
+			s.inCodeBlock = true
+			s.codeBlockLang = lang
+			s.codeBlockDesc = desc
+			s.codeBlockBuf = s.codeBlockBuf[:0]
+			return
+		}
+	}
+
+	// Cheat comments - starts with <
+	if first == '<' {
+		// Single-line cheat comment: <!-- cheat ... -->
+		if content, ok := parseCheatSingleLine(line); ok {
+			p.processCheatComment(path, s, content)
+			return
+		}
+		// Multi-line cheat block start: <!-- cheat
+		if isCheatStart(line) {
+			s.inCheatBlock = true
+			s.cheatBlockBuf = s.cheatBlockBuf[:0]
+			return
+		}
+	}
+}
+
+// parseHeader extracts header text without regex: "## Header" -> "Header"
+func parseHeader(line []byte) (string, bool) {
+	i := 0
+	// Count leading #
+	for i < len(line) && line[i] == '#' {
+		i++
+	}
+	if i == 0 || i > 6 {
+		return "", false
+	}
+	// Must have space after #
+	if i >= len(line) || line[i] != ' ' {
+		return "", false
+	}
+	i++ // skip space
+	// Rest is header text
+	if i >= len(line) {
+		return "", false
+	}
+	return string(line[i:]), true
+}
+
+// parseCodeBlockStart parses ```lang title:"desc" without regex for simple cases
+func parseCodeBlockStart(line []byte) (lang, desc string, ok bool) {
+	if len(line) < 3 || line[0] != '`' || line[1] != '`' || line[2] != '`' {
+		return "", "", false
+	}
+	rest := line[3:]
+
+	// Fast path: just ``` or ```lang
+	titleIdx := bytes.Index(rest, []byte("title:"))
+	if titleIdx == -1 {
+		// No title - just extract lang (word characters until space or end)
+		end := 0
+		for end < len(rest) && isWordChar(rest[end]) {
+			end++
+		}
+		return string(rest[:end]), "", true
+	}
+
+	// Has title - use regex for complex case
+	if matches := patterns.codeBlockStart.FindSubmatch(line); matches != nil {
+		lang := ""
+		desc := ""
+		if len(matches) > 1 {
+			lang = string(matches[1])
+		}
+		if len(matches) > 2 {
+			desc = string(matches[2])
+		}
+		return lang, desc, true
+	}
+	return "", "", false
+}
+
+// parseCheatSingleLine parses <!-- cheat ... --> and returns the content
+func parseCheatSingleLine(line []byte) (string, bool) {
+	// Quick rejection
+	if len(line) < 15 { // minimum: <!-- cheat -->
+		return "", false
+	}
+	if !bytes.HasPrefix(line, []byte("<!--")) {
+		return "", false
+	}
+	if !bytes.HasSuffix(line, []byte("-->")) {
+		return "", false
+	}
+
+	// Check for "cheat" after <!--
+	inner := bytes.TrimSpace(line[4 : len(line)-3])
+	if len(inner) < 5 {
+		return "", false
+	}
+
+	// Case-insensitive "cheat" check
+	if !bytes.EqualFold(inner[:5], []byte("cheat")) {
+		return "", false
+	}
+
+	return string(bytes.TrimSpace(inner[5:])), true
+}
+
+// isCheatStart checks for <!-- cheat (multiline start)
+func isCheatStart(line []byte) bool {
+	if len(line) < 10 {
+		return false
+	}
+	if !bytes.HasPrefix(line, []byte("<!--")) {
+		return false
+	}
+	inner := bytes.TrimSpace(line[4:])
+	return bytes.EqualFold(inner, []byte("cheat"))
+}
+
+// isCheatEnd checks for --> (multiline end)
+func isCheatEnd(line []byte) bool {
+	trimmed := bytes.TrimSpace(line)
+	return bytes.Equal(trimmed, []byte("-->"))
+}
+
+// isWordChar returns true for [a-zA-Z0-9_]
+func isWordChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+// trimSpaceBytes trims leading/trailing whitespace from bytes without allocating
+func trimSpaceBytes(b []byte) []byte {
+	start := 0
+	for start < len(b) && (b[start] == ' ' || b[start] == '\t' || b[start] == '\n' || b[start] == '\r') {
+		start++
+	}
+	end := len(b)
+	for end > start && (b[end-1] == ' ' || b[end-1] == '\t' || b[end-1] == '\n' || b[end-1] == '\r') {
+		end--
+	}
+	return b[start:end]
 }
 
 // processCheatComment handles single-line <!-- cheat ... --> comments
@@ -375,7 +691,7 @@ func (p *Parser) processCheatComment(path string, s *parseState, content string)
 
 // processCheatBlock handles multi-line cheat blocks
 func (p *Parser) processCheatBlock(path string, s *parseState) {
-	content := s.cheatBlockContent.String()
+	content := string(s.cheatBlockBuf)
 
 	if len(s.pendingCodeBlocks) > 0 {
 		lastIdx := len(s.pendingCodeBlocks) - 1
@@ -413,13 +729,38 @@ func (p *Parser) createCheat(path, header, description, command, cheatBlock stri
 	cheat.Description = strings.TrimSpace(description)
 	cheat.Command = command
 	cheat.HasCheatBlock = hasCheatBlock
-	cheat.Tags = extractTags(path, header)
+	cheat.Tags = p.getTagsForPath(path, header)
 
 	if cheatBlock != "" {
 		parseCheatDSL(cheat, cheatBlock)
 	}
 
 	return cheat
+}
+
+// getTagsForPath returns cached path tags plus header tag
+func (p *Parser) getTagsForPath(path, header string) []string {
+	dir := filepath.Dir(path)
+	pathTags, ok := p.pathTagsCache[dir]
+	if !ok {
+		// Build path tags once per directory
+		for _, part := range strings.Split(dir, string(filepath.Separator)) {
+			if part != "" && part != "." {
+				pathTags = append(pathTags, strings.ToLower(part))
+			}
+		}
+		p.pathTagsCache[dir] = pathTags
+	}
+
+	// Add header tag if present
+	if idx := strings.IndexByte(header, ':'); idx != -1 {
+		// Copy and append to avoid modifying cached slice
+		tags := make([]string, len(pathTags), len(pathTags)+1)
+		copy(tags, pathTags)
+		return append(tags, strings.ToLower(strings.TrimSpace(header[:idx])))
+	}
+
+	return pathTags
 }
 
 // parseCheatDSL parses the DSL content within a cheat block
@@ -509,43 +850,11 @@ func joinContinuationLines(lines []string) []string {
 // Helpers
 // ============================================================================
 
-// readFileLines reads all lines from a file
-func readFileLines(path string) ([]string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	return lines, scanner.Err()
-}
-
 // isMarkdownFile checks if a path is a markdown file
 func isMarkdownFile(path string) bool {
-	return strings.HasSuffix(strings.ToLower(path), ".md")
-}
-
-// extractTags extracts tags from path and header
-func extractTags(path, header string) []string {
-	var tags []string
-
-	// Tags from directory path
-	dir := filepath.Dir(path)
-	for _, part := range strings.Split(dir, string(filepath.Separator)) {
-		if part != "" && part != "." {
-			tags = append(tags, strings.ToLower(part))
-		}
+	if len(path) < 3 {
+		return false
 	}
-
-	// Tag from header prefix (e.g., "git: clone" -> "git")
-	if idx := strings.Index(header, ":"); idx != -1 {
-		tags = append(tags, strings.ToLower(strings.TrimSpace(header[:idx])))
-	}
-
-	return tags
+	ext := path[len(path)-3:]
+	return ext == ".md" || ext == ".MD" || strings.EqualFold(path[len(path)-3:], ".md")
 }

@@ -112,15 +112,25 @@ func (e *Executor) RunShell(command string) (string, error) {
 	cmd := exec.Command(e.shell, "-c", command)
 	cmd.Env = os.Environ()
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.Output()
+	if err != nil {
 		return "", fmt.Errorf("shell error: %w: %s", err, stderr.String())
 	}
 
-	return strings.TrimSpace(stdout.String()), nil
+	// Trim trailing whitespace efficiently
+	end := len(output)
+	for end > 0 && (output[end-1] == ' ' || output[end-1] == '\n' || output[end-1] == '\r' || output[end-1] == '\t') {
+		end--
+	}
+	start := 0
+	for start < end && (output[start] == ' ' || output[start] == '\n' || output[start] == '\r' || output[start] == '\t') {
+		start++
+	}
+
+	return string(output[start:end]), nil
 }
 
 // Execute runs a command interactively with inherited stdin/stdout/stderr

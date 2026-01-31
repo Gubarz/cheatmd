@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"time"
 
 	"github.com/gubarz/cheatmd/internal/config"
 	"github.com/gubarz/cheatmd/internal/executor"
@@ -52,6 +54,7 @@ func init() {
 	rootCmd.PersistentFlags().Bool("copy", false, "Copy command (shorthand for -o copy)")
 	rootCmd.PersistentFlags().Bool("exec", false, "Execute command (shorthand for -o exec)")
 	rootCmd.PersistentFlags().Bool("auto", false, "Auto-select if query matches exactly one result")
+	rootCmd.PersistentFlags().BoolP("benchmark", "b", false, "Benchmark load time and exit")
 
 	viper.BindPFlag("output", rootCmd.PersistentFlags().Lookup("output"))
 }
@@ -192,6 +195,9 @@ func runCheats(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse markdown files
+	benchmark, _ := cmd.Flags().GetBool("benchmark")
+	start := time.Now()
+
 	p := parser.NewParser()
 	var index *parser.CheatIndex
 
@@ -220,6 +226,18 @@ func runCheats(cmd *cobra.Command, args []string) error {
 
 	// Create executor
 	exec := executor.NewExecutor(index)
+
+	if benchmark {
+		elapsed := time.Since(start)
+		// Force GC and get memory stats
+		runtime.GC()
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		fmt.Printf("Loaded %d cheats in %v\n", len(index.Cheats), elapsed)
+		fmt.Printf("Memory: Alloc=%dMB, TotalAlloc=%dMB, Sys=%dMB, HeapObjects=%d\n",
+			m.Alloc/1024/1024, m.TotalAlloc/1024/1024, m.Sys/1024/1024, m.HeapObjects)
+		return nil
+	}
 
 	// Run the TUI
 	return ui.Run(index, exec, query, match)

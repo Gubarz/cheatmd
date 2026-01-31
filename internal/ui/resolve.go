@@ -146,7 +146,26 @@ func resolveAllVariables(cheat *parser.Cheat, index *parser.CheatIndex, exec *ex
 // Also detects variable dependencies (vars referenced in other vars' shell commands)
 // Supports conditional var definitions (if/fi blocks) - stores all variants per name
 func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState {
-	// Store list of definitions per var name (for conditional variants)
+	varDefs := collectVarDefinitions(cheat, index)
+	usedVars := findAllVars(cheat.Command)
+	allNeeded := findAllDependencies(usedVars, varDefs)
+	orderedVars := topologicalSort(usedVars, varDefs, allNeeded)
+
+	// Build final list - only include vars that have definitions
+	var vars []varState
+	for _, varName := range orderedVars {
+		if defs, ok := varDefs[varName]; ok && len(defs) > 0 {
+			vars = append(vars, varState{
+				def:      defs[0],
+				variants: defs,
+			})
+		}
+	}
+	return vars
+}
+
+// collectVarDefinitions gathers all var definitions from imports and local cheat
+func collectVarDefinitions(cheat *parser.Cheat, index *parser.CheatIndex) map[string][]parser.VarDef {
 	varDefs := make(map[string][]parser.VarDef)
 
 	// Collect from imports recursively
@@ -167,15 +186,24 @@ func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState 
 	}
 	collectFromImports(cheat.Imports, make(map[string]bool))
 
-	// Local definitions are added (can have multiple conditional variants)
+	// Local definitions
 	for _, v := range cheat.Vars {
 		varDefs[v.Name] = append(varDefs[v.Name], v)
 	}
+	return varDefs
+}
 
-	// Find vars used in the command
-	usedVars := findAllVars(cheat.Command)
+// varDefDependencies returns all variable references in a VarDef
+func varDefDependencies(def parser.VarDef) []string {
+	var deps []string
+	deps = append(deps, findAllVars(def.Shell)...)
+	deps = append(deps, findAllVars(def.Literal)...)
+	deps = append(deps, findAllVars(def.Condition)...)
+	return deps
+}
 
-	// Find dependencies (transitive closure)
+// findAllDependencies finds transitive closure of all needed variables
+func findAllDependencies(usedVars []string, varDefs map[string][]parser.VarDef) map[string]bool {
 	allNeeded := make(map[string]bool)
 	queue := make([]string, len(usedVars))
 	copy(queue, usedVars)
@@ -189,62 +217,32 @@ func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState 
 		}
 		allNeeded[varName] = true
 
-		// Check all variants of this var for dependencies
 		for _, def := range varDefs[varName] {
-			if def.Shell != "" {
-				for _, dep := range findAllVars(def.Shell) {
-					if !allNeeded[dep] {
-						queue = append(queue, dep)
-					}
-				}
-			}
-			if def.Literal != "" {
-				for _, dep := range findAllVars(def.Literal) {
-					if !allNeeded[dep] {
-						queue = append(queue, dep)
-					}
-				}
-			}
-			if def.Condition != "" {
-				for _, dep := range findAllVars(def.Condition) {
-					if !allNeeded[dep] {
-						queue = append(queue, dep)
-					}
+			for _, dep := range varDefDependencies(def) {
+				if !allNeeded[dep] {
+					queue = append(queue, dep)
 				}
 			}
 		}
 	}
+	return allNeeded
+}
 
-	// Build dependency graph and topologically sort
+// topologicalSort orders variables by their dependencies
+func topologicalSort(usedVars []string, varDefs map[string][]parser.VarDef, allNeeded map[string]bool) []string {
 	var orderedVars []string
 	added := make(map[string]bool)
 	visiting := make(map[string]bool)
 
 	var addWithDeps func(varName string)
 	addWithDeps = func(varName string) {
-		if added[varName] || !allNeeded[varName] {
-			return
-		}
-		if visiting[varName] {
+		if added[varName] || !allNeeded[varName] || visiting[varName] {
 			return
 		}
 		visiting[varName] = true
-		// Check all variants for dependencies
 		for _, def := range varDefs[varName] {
-			if def.Shell != "" {
-				for _, dep := range findAllVars(def.Shell) {
-					addWithDeps(dep)
-				}
-			}
-			if def.Literal != "" {
-				for _, dep := range findAllVars(def.Literal) {
-					addWithDeps(dep)
-				}
-			}
-			if def.Condition != "" {
-				for _, dep := range findAllVars(def.Condition) {
-					addWithDeps(dep)
-				}
+			for _, dep := range varDefDependencies(def) {
+				addWithDeps(dep)
 			}
 		}
 		visiting[varName] = false
@@ -255,21 +253,7 @@ func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState 
 	for _, v := range usedVars {
 		addWithDeps(v)
 	}
-
-	// Build final list - only include vars that have definitions
-	// Undefined vars (like $i in a bash loop) are left for the shell
-	var vars []varState
-	for _, varName := range orderedVars {
-		if defs, ok := varDefs[varName]; ok && len(defs) > 0 {
-			vars = append(vars, varState{
-				def:      defs[0], // Primary definition
-				variants: defs,    // All conditional variants
-			})
-		}
-		// Skip undefined vars - they're shell variables (like $i in loops)
-	}
-
-	return vars
+	return orderedVars
 }
 
 // selectVariant picks the first variant whose condition matches, or nil if none match
@@ -612,13 +596,40 @@ func findAllVars(cmd string) []string {
 }
 
 // splitLines splits text into non-empty trimmed lines
+// Optimized for large inputs - uses strings.Index instead of Split
 func splitLines(s string) []string {
-	var lines []string
-	for _, line := range strings.Split(s, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			lines = append(lines, trimmed)
+	if s == "" {
+		return nil
+	}
+
+	// Count lines first to pre-allocate (rough estimate)
+	lineCount := strings.Count(s, "\n") + 1
+	lines := make([]string, 0, lineCount)
+
+	for len(s) > 0 {
+		idx := strings.IndexByte(s, '\n')
+		var line string
+		if idx == -1 {
+			line = s
+			s = ""
+		} else {
+			line = s[:idx]
+			s = s[idx+1:]
+		}
+
+		// Trim inline (avoid TrimSpace allocation if not needed)
+		start, end := 0, len(line)
+		for start < end && (line[start] == ' ' || line[start] == '\t' || line[start] == '\r') {
+			start++
+		}
+		for end > start && (line[end-1] == ' ' || line[end-1] == '\t' || line[end-1] == '\r') {
+			end--
+		}
+		if start < end {
+			lines = append(lines, line[start:end])
 		}
 	}
+
 	return lines
 }
 
@@ -692,16 +703,4 @@ func applyMapTransform(value string, opts selectorOptions) string {
 		return value // fallback to original on error
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// getDisplayValue extracts the display column from a line
-func getDisplayValue(line string, opts selectorOptions) string {
-	if opts.delimiter == "" || opts.column == 0 {
-		return line
-	}
-	parts := strings.Split(line, opts.delimiter)
-	if opts.column > 0 && opts.column <= len(parts) {
-		return strings.TrimSpace(parts[opts.column-1])
-	}
-	return line
 }
