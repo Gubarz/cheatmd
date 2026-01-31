@@ -1228,6 +1228,12 @@ func RunTUI(index *parser.CheatIndex, exec *executor.Executor, initialQuery, mat
 			prefillScopeFromMatch(matched, matchCmd)
 			// Start variable resolution immediately
 			m.startVarResolutionInternal()
+
+			// If no variables to resolve, skip TUI entirely
+			if m.phase != phaseVarResolve {
+				finalCmd := exec.BuildFinalCommand(m.selected)
+				return executeOutput(finalCmd, exec)
+			}
 		} else {
 			// No exact match - use as initial query
 			initialQuery = matchCmd
@@ -1242,6 +1248,12 @@ func RunTUI(index *parser.CheatIndex, exec *executor.Executor, initialQuery, mat
 		if autoSelect && len(m.filtered) == 1 {
 			m.selected = m.filtered[0].cheat
 			m.startVarResolutionInternal()
+
+			// If no variables to resolve, skip TUI entirely
+			if m.phase != phaseVarResolve {
+				finalCmd := exec.BuildFinalCommand(m.selected)
+				return executeOutput(finalCmd, exec)
+			}
 		}
 	}
 
