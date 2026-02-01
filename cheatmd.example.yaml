@@ -21,6 +21,9 @@ key_open: "ctrl+o"
 show_folder: true
 show_file: true
 
+# Preview section height (number of lines)
+preview_height: 6
+
 # UI colors (256-color palette or hex)
 # See: https://www.ditig.com/256-colors-cheat-sheet
 color_header: "#cad2e2"     # htb heading for headers

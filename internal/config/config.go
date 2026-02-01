@@ -29,8 +29,9 @@ type Config struct {
 	KeyOpen   string `mapstructure:"key_open"`
 
 	// Display options
-	ShowFolder bool `mapstructure:"show_folder"`
-	ShowFile   bool `mapstructure:"show_file"`
+	ShowFolder    bool `mapstructure:"show_folder"`
+	ShowFile      bool `mapstructure:"show_file"`
+	PreviewHeight int  `mapstructure:"preview_height"`
 
 	// Colors
 	Colors ColorConfig
@@ -78,6 +79,7 @@ var defaults = struct {
 	keyOpen           string
 	showFolder        bool
 	showFile          bool
+	previewHeight     int
 	colors            ColorConfig
 	columns           ColumnConfig
 }{
@@ -94,6 +96,7 @@ var defaults = struct {
 	keyOpen:           "ctrl+o", // Ctrl+O in TUI
 	showFolder:        true,
 	showFile:          true,
+	previewHeight:     6,
 	colors: ColorConfig{
 		Header:   "36",  // Cyan
 		Command:  "32",  // Green
@@ -157,6 +160,7 @@ func setDefaults() {
 	// Display options
 	viper.SetDefault("show_folder", defaults.showFolder)
 	viper.SetDefault("show_file", defaults.showFile)
+	viper.SetDefault("preview_height", defaults.previewHeight)
 
 	// Colors
 	viper.SetDefault("color_header", defaults.colors.Header)
@@ -265,6 +269,11 @@ func GetShowFolder() bool {
 // GetShowFile returns whether to show file in title/list
 func GetShowFile() bool {
 	return viper.GetBool("show_file")
+}
+
+// GetPreviewHeight returns the preview section height in lines
+func GetPreviewHeight() int {
+	return viper.GetInt("preview_height")
 }
 
 // ============================================================================

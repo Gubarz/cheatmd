@@ -1026,7 +1026,10 @@ func (m mainModel) renderPreview(width int) string {
 	b := getBuilder()
 	defer putBuilder(b)
 	lines := 0
-	const maxLines = 6
+	maxLines := config.GetPreviewHeight()
+	if maxLines < 1 {
+		maxLines = 6 // fallback default
+	}
 
 	if m.cursor < len(m.filtered) {
 		item := m.filtered[m.cursor]
