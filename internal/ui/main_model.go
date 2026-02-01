@@ -1340,6 +1340,15 @@ func RunTUI(index *parser.CheatIndex, exec *executor.Executor, initialQuery, mat
 				finalCmd := exec.BuildFinalCommand(m.selected)
 				return executeOutput(finalCmd, exec)
 			}
+			
+			// Pre-set text input for first variable if it has a prefill
+			if m.varState != nil && len(m.varState.vars) > 0 {
+				vs := &m.varState.vars[0]
+				if vs.prefill != "" {
+					m.textInput.SetValue(vs.prefill)
+					m.textInput.CursorEnd()
+				}
+			}
 		} else {
 			// No exact match - use as initial query
 			initialQuery = matchCmd
@@ -1491,7 +1500,7 @@ func findMatchingCheat(cheats []*parser.Cheat, input string) *parser.Cheat {
 	}
 
 	for _, cheat := range cheats {
-		pattern := buildMatchPattern(cheat.Command)
+		pattern, _ := buildMatchPattern(cheat.Command)
 		if pattern.MatchString(input) {
 			return cheat
 		}
@@ -1502,31 +1511,83 @@ func findMatchingCheat(cheats []*parser.Cheat, input string) *parser.Cheat {
 // buildMatchPattern converts a command template to a regex pattern for matching
 // e.g. "echo $name" -> "^echo (\S+)$"
 // e.g. 'echo "$name"' -> '^echo "([^"]*)"$'
-func buildMatchPattern(cmd string) *regexp.Regexp {
-	escaped := regexp.QuoteMeta(cmd)
-	// After QuoteMeta: "$var" becomes "\$var" (quotes not escaped, $ is escaped)
-	// Replace "\$var" inside double quotes with "([^"]*)"
-	quotedVarPattern := regexp.MustCompile(`"\\\$(\w+)"`)
-	escaped = quotedVarPattern.ReplaceAllString(escaped, `"([^"]*)"`)
-	// Same for single quotes
-	singleQuotedVarPattern := regexp.MustCompile(`'\\\$(\w+)'`)
-	escaped = singleQuotedVarPattern.ReplaceAllString(escaped, `'([^']*)'`)
-	// Replace remaining unquoted $var with non-whitespace match
-	varPattern := regexp.MustCompile(`\\\$(\w+)`)
-	escaped = varPattern.ReplaceAllString(escaped, `(\S+)`)
-	pattern := `^\s*` + escaped + `\s*$`
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return regexp.MustCompile(`^$`)
+// Returns the pattern and a list of variable names for each capture group (may have duplicates)
+func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
+	// First, find all variables in order
+	varPattern := regexp.MustCompile(`\$(\w+)`)
+	allMatches := varPattern.FindAllStringSubmatchIndex(cmd, -1)
+	
+	var varOrder []string // var name for each capture group (may have duplicates)
+	
+	// Build the pattern by processing the command
+	var result strings.Builder
+	result.WriteString(`^\s*`)
+	lastEnd := 0
+	
+	for _, match := range allMatches {
+		// match[0:1] is full match start:end, match[2:3] is capture group start:end
+		varStart := match[0]
+		varEnd := match[1]
+		varName := cmd[match[2]:match[3]]
+		
+		// Add escaped literal text before this variable
+		if varStart > lastEnd {
+			result.WriteString(regexp.QuoteMeta(cmd[lastEnd:varStart]))
+		}
+		
+		// Every occurrence gets a capture group (Go regex doesn't support backreferences)
+		varOrder = append(varOrder, varName)
+		
+		// Check if variable is inside quotes
+		beforeVar := cmd[:varStart]
+		afterVar := cmd[varEnd:]
+		
+		if strings.HasSuffix(beforeVar, `"`) && strings.HasPrefix(afterVar, `"`) {
+			// Inside double quotes - don't include the quotes in capture
+			// Remove the trailing quote we already added
+			current := result.String()
+			if strings.HasSuffix(current, `"`) {
+				result.Reset()
+				result.WriteString(current[:len(current)-1])
+			}
+			result.WriteString(`"([^"]*)"`)
+			lastEnd = varEnd + 1 // Skip the closing quote
+			continue
+		} else if strings.HasSuffix(beforeVar, `'`) && strings.HasPrefix(afterVar, `'`) {
+			// Inside single quotes
+			current := result.String()
+			if strings.HasSuffix(current, `'`) {
+				result.Reset()
+				result.WriteString(current[:len(current)-1])
+			}
+			result.WriteString(`'([^']*)'`)
+			lastEnd = varEnd + 1 // Skip the closing quote
+			continue
+		} else {
+			// Unquoted variable
+			result.WriteString(`(\S+)`)
+		}
+		lastEnd = varEnd
 	}
-	return re
+	
+	// Add remaining literal text
+	if lastEnd < len(cmd) {
+		result.WriteString(regexp.QuoteMeta(cmd[lastEnd:]))
+	}
+	result.WriteString(`\s*$`)
+	
+	re, err := regexp.Compile(result.String())
+	if err != nil {
+		return regexp.MustCompile(`^$`), nil
+	}
+	return re, varOrder
 }
 
 // prefillScopeFromMatch extracts variable values from the matched command
 func prefillScopeFromMatch(cheat *parser.Cheat, input string) {
 	input = strings.TrimSpace(input)
-	pattern := buildMatchPattern(cheat.Command)
-	if pattern == nil {
+	pattern, varNames := buildMatchPattern(cheat.Command)
+	if pattern == nil || len(varNames) == 0 {
 		return
 	}
 
@@ -1539,15 +1600,18 @@ func prefillScopeFromMatch(cheat *parser.Cheat, input string) {
 		cheat.Scope = make(map[string]string)
 	}
 
-	varNames := extractVarNames(cheat.Command)
+	// varNames may have duplicates - use first occurrence of each variable
 	for i, name := range varNames {
 		if i+1 < len(matches) {
-			cheat.Scope[name] = matches[i+1]
+			// Only set if not already set (use first occurrence)
+			if _, exists := cheat.Scope[name]; !exists {
+				cheat.Scope[name] = matches[i+1]
+			}
 		}
 	}
 }
 
-// extractVarNames returns variable names in order of appearance
+// extractVarNames returns variable names in order of appearance (unique)
 func extractVarNames(cmd string) []string {
 	varPattern := regexp.MustCompile(`\$(\w+)`)
 	matches := varPattern.FindAllStringSubmatch(cmd, -1)
