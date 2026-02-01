@@ -452,7 +452,8 @@ func (m *mainModel) startVarResolutionInternal() {
 	}
 	m.phase = phaseVarResolve
 
-	// Reset text input for variable resolution
+	// Save query and reset text input for variable resolution
+	m.lastQuery = m.textInput.Value()
 	m.textInput.SetValue("")
 	m.textInput.Placeholder = "Type to filter or enter value..."
 	m.cursor = 0
@@ -524,6 +525,15 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 		result := vs.def.Literal
 		for name, value := range scope {
 			result = strings.ReplaceAll(result, "$"+name, value)
+		}
+		// If user went back to this var, show it instead of auto-resolving
+		if vs.skipAutoCont {
+			m.varState.isPromptOnly = true
+			m.varState.options = nil
+			m.varState.filtered = nil
+			m.textInput.SetValue(result)
+			m.textInput.CursorEnd()
+			return nil
 		}
 		vs.value = result
 		vs.resolved = true
@@ -752,7 +762,7 @@ func (m *mainModel) handleVarResolveKey(msg tea.KeyMsg) tea.Cmd {
 		m.phase = phaseCheatSelect
 		m.varState = nil
 		m.selected = nil
-		m.textInput.SetValue("")
+		m.textInput.SetValue(m.lastQuery)
 		m.textInput.Placeholder = "Type to search..."
 		m.cursor = 0
 		m.offset = 0
