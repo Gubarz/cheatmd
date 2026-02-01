@@ -902,11 +902,6 @@ func (m mainModel) renderVarResolve() string {
 	return b.String()
 }
 
-// renderVarBottom renders the options list and input at the bottom
-func (m mainModel) renderVarBottom(width int) string {
-	return m.renderVarBottomWithHeight(width, 15) // default max height
-}
-
 // renderVarBottomWithHeight renders the options list and input with a max height
 func (m mainModel) renderVarBottomWithHeight(width int, maxHeight int) string {
 	b := getBuilder()
@@ -1065,15 +1060,6 @@ func (m mainModel) renderCheatSelect() string {
 	b.WriteString(m.renderInput(width))
 
 	return b.String()
-}
-
-// renderPreview renders the preview section for the selected cheat using config height
-func (m mainModel) renderPreview(width int) string {
-	maxLines := config.GetPreviewHeight()
-	if maxLines < 1 {
-		maxLines = 6 // fallback default
-	}
-	return m.renderPreviewWithHeight(width, maxLines)
 }
 
 // renderPreviewWithHeight renders the preview section with a specific height
@@ -1641,7 +1627,7 @@ func prefillScopeFromMatch(cheat *parser.Cheat, input string) {
 // For example, if auth_flags=-k and we have "if $auth_method == kerberos then auth_flags := -k"
 // we can infer auth_method=kerberos
 func inferDependentVars(cheat *parser.Cheat, index *parser.CheatIndex) {
-	if cheat.Scope == nil || len(cheat.Scope) == 0 {
+	if len(cheat.Scope) == 0 {
 		return
 	}
 
@@ -1801,21 +1787,6 @@ func extractEmbeddedVars(template, actual string, existingScope map[string]strin
 	}
 
 	return result
-}
-
-// extractVarNames returns variable names in order of appearance (unique)
-func extractVarNames(cmd string) []string {
-	varPattern := regexp.MustCompile(`\$(\w+)`)
-	matches := varPattern.FindAllStringSubmatch(cmd, -1)
-	var names []string
-	seen := make(map[string]bool)
-	for _, m := range matches {
-		if !seen[m[1]] {
-			names = append(names, m[1])
-			seen[m[1]] = true
-		}
-	}
-	return names
 }
 
 // openFileInViewer opens the file in the configured editor or system default
