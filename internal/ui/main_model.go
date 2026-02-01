@@ -874,7 +874,10 @@ func (m mainModel) renderVarResolve() string {
 	}
 
 	width := maxInt(m.width, 80)
-	height := maxInt(m.height, 24)
+	height := m.height
+	if height < 1 {
+		height = 24 // fallback for uninitialized
+	}
 
 	b := getBuilder()
 	defer putBuilder(b)
@@ -884,7 +887,9 @@ func (m mainModel) renderVarResolve() string {
 	headerLines := countLines(header)
 
 	// Bottom section: list + input
-	bottom := m.renderVarBottom(width)
+	// Calculate available space and pass it to renderVarBottom
+	availableForBottom := maxInt(height-headerLines, 5)
+	bottom := m.renderVarBottomWithHeight(width, availableForBottom)
 	bottomLines := countLines(bottom)
 
 	// Layout: header at top, padding in middle, bottom at bottom
@@ -899,15 +904,25 @@ func (m mainModel) renderVarResolve() string {
 
 // renderVarBottom renders the options list and input at the bottom
 func (m mainModel) renderVarBottom(width int) string {
+	return m.renderVarBottomWithHeight(width, 15) // default max height
+}
+
+// renderVarBottomWithHeight renders the options list and input with a max height
+func (m mainModel) renderVarBottomWithHeight(width int, maxHeight int) string {
 	b := getBuilder()
 	defer putBuilder(b)
 
 	b.WriteString(styles.Divider.Render(strings.Repeat("─", width)))
 	b.WriteString("\n")
 
+	// Fixed lines: top divider(1) + bottom divider(1) + info line(1) + input(1) = 4
+	fixedLines := 4
+
 	// Options list (if not prompt-only)
 	if !m.varState.isPromptOnly && len(m.varState.filtered) > 0 {
-		listHeight := minInt(10, len(m.varState.filtered))
+		// Calculate available space for list
+		availableForList := maxInt(maxHeight-fixedLines, 1)
+		listHeight := minInt(availableForList, minInt(10, len(m.varState.filtered)))
 		start, end := scrollWindow(m.cursor, len(m.varState.filtered), listHeight, &m.offset)
 
 		for i := start; i < end; i++ {
