@@ -1332,6 +1332,8 @@ func RunTUI(index *parser.CheatIndex, exec *executor.Executor, initialQuery, mat
 			m.selected = matched
 			// Pre-fill scope from the matched command
 			prefillScopeFromMatch(matched, matchCmd)
+			// Try to infer dependent variables from literals
+			inferDependentVars(matched, index)
 			// Start variable resolution immediately
 			m.startVarResolutionInternal()
 
@@ -1340,7 +1342,7 @@ func RunTUI(index *parser.CheatIndex, exec *executor.Executor, initialQuery, mat
 				finalCmd := exec.BuildFinalCommand(m.selected)
 				return executeOutput(finalCmd, exec)
 			}
-			
+
 			// Pre-set text input for first variable if it has a prefill
 			if m.varState != nil && len(m.varState.vars) > 0 {
 				vs := &m.varState.vars[0]
@@ -1516,32 +1518,32 @@ func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
 	// First, find all variables in order
 	varPattern := regexp.MustCompile(`\$(\w+)`)
 	allMatches := varPattern.FindAllStringSubmatchIndex(cmd, -1)
-	
+
 	var varOrder []string // var name for each capture group (may have duplicates)
-	
+
 	// Build the pattern by processing the command
 	var result strings.Builder
 	result.WriteString(`^\s*`)
 	lastEnd := 0
-	
-	for _, match := range allMatches {
+
+	for i, match := range allMatches {
 		// match[0:1] is full match start:end, match[2:3] is capture group start:end
 		varStart := match[0]
 		varEnd := match[1]
 		varName := cmd[match[2]:match[3]]
-		
+
 		// Add escaped literal text before this variable
 		if varStart > lastEnd {
 			result.WriteString(regexp.QuoteMeta(cmd[lastEnd:varStart]))
 		}
-		
+
 		// Every occurrence gets a capture group (Go regex doesn't support backreferences)
 		varOrder = append(varOrder, varName)
-		
+
 		// Check if variable is inside quotes
 		beforeVar := cmd[:varStart]
 		afterVar := cmd[varEnd:]
-		
+
 		if strings.HasSuffix(beforeVar, `"`) && strings.HasPrefix(afterVar, `"`) {
 			// Inside double quotes - don't include the quotes in capture
 			// Remove the trailing quote we already added
@@ -1565,17 +1567,41 @@ func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
 			continue
 		} else {
 			// Unquoted variable
-			result.WriteString(`(\S+)`)
+			// Check if this is the last variable AND there's no more text after it
+			isLastVar := i == len(allMatches)-1
+			remainingText := strings.TrimSpace(cmd[varEnd:])
+			if isLastVar && remainingText == "" {
+				// Last variable at end of command - use greedy pattern to capture multi-word values
+				result.WriteString(`(.+)`)
+			} else {
+				// Mid-command variable: find the next literal text to anchor on
+				// Look for next literal text (between this var and next var, or end of command)
+				nextLiteralStart := varEnd
+				nextLiteralEnd := len(cmd)
+				if i+1 < len(allMatches) {
+					nextLiteralEnd = allMatches[i+1][0] // start of next variable
+				}
+				nextLiteral := strings.TrimSpace(cmd[nextLiteralStart:nextLiteralEnd])
+
+				if nextLiteral != "" {
+					// Use non-greedy pattern that stops at the next literal
+					// e.g., for "...$auth_flags add..." we want (.+?) followed by " add"
+					result.WriteString(`(.+?)`)
+				} else {
+					// No literal after - just use \S+ (next thing is another variable)
+					result.WriteString(`(\S+)`)
+				}
+			}
 		}
 		lastEnd = varEnd
 	}
-	
+
 	// Add remaining literal text
 	if lastEnd < len(cmd) {
 		result.WriteString(regexp.QuoteMeta(cmd[lastEnd:]))
 	}
 	result.WriteString(`\s*$`)
-	
+
 	re, err := regexp.Compile(result.String())
 	if err != nil {
 		return regexp.MustCompile(`^$`), nil
@@ -1609,6 +1635,172 @@ func prefillScopeFromMatch(cheat *parser.Cheat, input string) {
 			}
 		}
 	}
+}
+
+// inferDependentVars tries to reverse-engineer dependent variables from literal values
+// For example, if auth_flags=-k and we have "if $auth_method == kerberos then auth_flags := -k"
+// we can infer auth_method=kerberos
+func inferDependentVars(cheat *parser.Cheat, index *parser.CheatIndex) {
+	if cheat.Scope == nil || len(cheat.Scope) == 0 {
+		return
+	}
+
+	// Get all variable definitions
+	varDefs := collectVarDefinitions(cheat, index)
+
+	// Keep inferring until no new values are found
+	changed := true
+	for changed {
+		changed = false
+		for varName, prefillValue := range cheat.Scope {
+			defs, ok := varDefs[varName]
+			if !ok {
+				continue
+			}
+
+			// Look for conditional literal definitions that could produce this value
+			for _, def := range defs {
+				if def.Literal == "" || def.Condition == "" {
+					continue
+				}
+
+				// Parse condition: "$var == value" or "$var != value"
+				condVar, condOp, condValue := parseCondition(def.Condition)
+				if condVar == "" {
+					continue
+				}
+
+				// Skip if condition var is already set
+				if _, exists := cheat.Scope[condVar]; exists {
+					continue
+				}
+
+				// Check if this literal (with current scope) would produce the prefilled value
+				literalResult := def.Literal
+				for scopeVar, scopeVal := range cheat.Scope {
+					literalResult = strings.ReplaceAll(literalResult, "$"+scopeVar, scopeVal)
+				}
+
+				// If literal still has unresolved vars, try to extract them
+				if strings.Contains(literalResult, "$") {
+					// Try to extract embedded variable values
+					extracted := extractEmbeddedVars(def.Literal, prefillValue, cheat.Scope)
+					for k, v := range extracted {
+						if _, exists := cheat.Scope[k]; !exists {
+							cheat.Scope[k] = v
+							changed = true
+						}
+					}
+					// Recompute literal with new extractions
+					literalResult = def.Literal
+					for scopeVar, scopeVal := range cheat.Scope {
+						literalResult = strings.ReplaceAll(literalResult, "$"+scopeVar, scopeVal)
+					}
+				}
+
+				// Check if the resolved literal matches the prefilled value
+				if literalResult == prefillValue {
+					// Infer the condition variable
+					if condOp == "==" {
+						cheat.Scope[condVar] = condValue
+						changed = true
+					}
+					// For != we can't directly infer the value
+				}
+			}
+		}
+	}
+}
+
+// parseCondition parses "$var == value" or "$var != value"
+func parseCondition(cond string) (varName, op, value string) {
+	cond = strings.TrimSpace(cond)
+
+	// Try == first
+	if idx := strings.Index(cond, "=="); idx != -1 {
+		left := strings.TrimSpace(cond[:idx])
+		right := strings.TrimSpace(cond[idx+2:])
+		if strings.HasPrefix(left, "$") {
+			return left[1:], "==", right
+		}
+	}
+
+	// Try !=
+	if idx := strings.Index(cond, "!="); idx != -1 {
+		left := strings.TrimSpace(cond[:idx])
+		right := strings.TrimSpace(cond[idx+2:])
+		if strings.HasPrefix(left, "$") {
+			return left[1:], "!=", right
+		}
+	}
+
+	return "", "", ""
+}
+
+// extractEmbeddedVars tries to extract variable values embedded in a literal template
+// For example: template="-p $credential", actual="-p mypass" -> {credential: mypass}
+func extractEmbeddedVars(template, actual string, existingScope map[string]string) map[string]string {
+	result := make(map[string]string)
+
+	// Substitute already-known variables
+	pattern := template
+	for k, v := range existingScope {
+		pattern = strings.ReplaceAll(pattern, "$"+k, regexp.QuoteMeta(v))
+	}
+
+	// Find remaining variables and build a regex
+	varPattern := regexp.MustCompile(`\$(\w+)`)
+	varMatches := varPattern.FindAllStringSubmatchIndex(pattern, -1)
+	if len(varMatches) == 0 {
+		return result
+	}
+
+	// Build regex pattern, replacing $var with capture groups
+	var regexParts strings.Builder
+	regexParts.WriteString("^")
+	lastEnd := 0
+	var varNames []string
+
+	for i, match := range varMatches {
+		varStart := match[0]
+		varEnd := match[1]
+		varName := pattern[match[2]:match[3]]
+
+		if varStart > lastEnd {
+			regexParts.WriteString(regexp.QuoteMeta(pattern[lastEnd:varStart]))
+		}
+
+		// Use greedy capture for the last variable, non-greedy otherwise
+		if i == len(varMatches)-1 && varEnd == len(pattern) {
+			regexParts.WriteString(`(.+)`) // Greedy for final variable at end
+		} else {
+			regexParts.WriteString(`(.+?)`) // Non-greedy otherwise
+		}
+		varNames = append(varNames, varName)
+		lastEnd = varEnd
+	}
+	if lastEnd < len(pattern) {
+		regexParts.WriteString(regexp.QuoteMeta(pattern[lastEnd:]))
+	}
+	regexParts.WriteString("$")
+
+	re, err := regexp.Compile(regexParts.String())
+	if err != nil {
+		return result
+	}
+
+	matches := re.FindStringSubmatch(actual)
+	if matches == nil {
+		return result
+	}
+
+	for i, name := range varNames {
+		if i+1 < len(matches) {
+			result[name] = matches[i+1]
+		}
+	}
+
+	return result
 }
 
 // extractVarNames returns variable names in order of appearance (unique)
