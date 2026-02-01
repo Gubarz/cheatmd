@@ -108,6 +108,21 @@ func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), substr)
 }
 
+// buildPathDisplay builds the path display string based on config options
+func buildPathDisplay(folder, file string) string {
+	showFolder := config.GetShowFolder()
+	showFile := config.GetShowFile()
+
+	if showFolder && showFile {
+		return folder + "/" + file
+	} else if showFolder {
+		return folder
+	} else if showFile {
+		return file
+	}
+	return ""
+}
+
 // ============================================================================
 // Column Config
 // ============================================================================
@@ -310,9 +325,12 @@ func (m *mainModel) handleCheatSelectKey(msg tea.KeyMsg) tea.Cmd {
 		m.cursor = 0
 	case "end", "ctrl+e":
 		m.cursor = max(0, len(m.filtered)-1)
-	case "ctrl+o":
-		if m.cursor < len(m.filtered) {
-			openFileInViewer(m.filtered[m.cursor].cheat.File)
+	default:
+		// Check for configurable open key
+		if msg.String() == config.GetKeyOpen() {
+			if m.cursor < len(m.filtered) {
+				openFileInViewer(m.filtered[m.cursor].cheat.File)
+			}
 		}
 	}
 	return nil
@@ -367,6 +385,15 @@ func (m *mainModel) filterCheats() {
 
 	m.cursor = clamp(m.cursor, 0, max(0, len(m.filtered)-1))
 	m.adjustOffset()
+}
+
+// formatKeyDisplay converts internal key format to display format
+// e.g., "ctrl+o" -> "Ctrl+O", "ctrl+x" -> "Ctrl+X"
+func formatKeyDisplay(key string) string {
+	if strings.HasPrefix(key, "ctrl+") {
+		return "Ctrl+" + strings.ToUpper(key[5:])
+	}
+	return key
 }
 
 // ============================================================================
@@ -752,9 +779,12 @@ func (m *mainModel) handleVarResolveKey(msg tea.KeyMsg) tea.Cmd {
 		if !m.varState.isPromptOnly && m.cursor < len(m.varState.filtered) {
 			m.textInput.SetValue(m.varState.filtered[m.cursor].display)
 		}
-	case "ctrl+o":
-		if m.varState != nil && m.varState.cheat != nil {
-			openFileInViewer(m.varState.cheat.File)
+	default:
+		// Check for configurable open key
+		if msg.String() == config.GetKeyOpen() {
+			if m.varState != nil && m.varState.cheat != nil {
+				openFileInViewer(m.varState.cheat.File)
+			}
 		}
 	}
 	return nil
@@ -1000,9 +1030,12 @@ func (m mainModel) renderPreview(width int) string {
 
 	if m.cursor < len(m.filtered) {
 		item := m.filtered[m.cursor]
-		b.WriteString(styles.PreviewPath.Render(item.folder + "/" + item.file))
-		b.WriteString("\n")
-		lines++
+		pathDisplay := buildPathDisplay(item.folder, item.file)
+		if pathDisplay != "" {
+			b.WriteString(styles.PreviewPath.Render(pathDisplay))
+			b.WriteString("\n")
+			lines++
+		}
 
 		b.WriteString(styles.PreviewHeader.Render(item.cheat.Header))
 		b.WriteString("\n")
@@ -1063,7 +1096,7 @@ func (m mainModel) renderListItem(item cheatItem, selected bool, gap string) str
 	pStyle, hStyle, dStyle, cStyle := m.getItemStyles(selected)
 
 	// Build header column
-	pathPart := item.folder + "/" + item.file
+	pathPart := buildPathDisplay(item.folder, item.file)
 	headerPart := item.cheat.Header
 	headerRendered := m.renderHeaderColumn(pathPart, headerPart, pStyle, hStyle, selected)
 
@@ -1101,23 +1134,32 @@ func (m mainModel) getItemStyles(selected bool) (path, header, desc, cmd lipglos
 
 // renderHeaderColumn renders the path+header column with proper truncation
 func (m mainModel) renderHeaderColumn(pathPart, headerPart string, pStyle, hStyle lipgloss.Style, selected bool) string {
-	fullHeader := pathPart + " " + headerPart
+	var fullHeader string
+	if pathPart != "" {
+		fullHeader = pathPart + " " + headerPart
+	} else {
+		fullHeader = headerPart
+	}
 
 	if m.columns.headerWidth > 1 && len(fullHeader) > m.columns.headerWidth {
 		fullHeader = fullHeader[:m.columns.headerWidth-1] + "…"
-		if len(pathPart) >= len(fullHeader) {
+		if pathPart != "" && len(pathPart) >= len(fullHeader) {
 			pathPart = fullHeader
 			headerPart = ""
-		} else {
+		} else if pathPart != "" {
 			headerPart = fullHeader[len(pathPart)+1:]
+		} else {
+			headerPart = fullHeader
 		}
 	}
 
 	var rendered string
-	if headerPart != "" {
+	if pathPart != "" && headerPart != "" {
 		rendered = pStyle.Render(pathPart) + " " + hStyle.Render(headerPart)
-	} else {
+	} else if pathPart != "" {
 		rendered = pStyle.Render(pathPart)
+	} else {
+		rendered = hStyle.Render(headerPart)
 	}
 
 	// Pad to column width
@@ -1159,7 +1201,11 @@ func (m mainModel) renderInput(width int) string {
 	b.WriteString("\n")
 	b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d/%d", len(m.filtered), len(m.cheats))))
 	b.WriteString(" • ")
-	b.WriteString(styles.Dim.Render("Ctrl+O open"))
+	keyOpen := config.GetKeyOpen()
+	if keyOpen == "" {
+		keyOpen = "ctrl+o"
+	}
+	b.WriteString(styles.Dim.Render(formatKeyDisplay(keyOpen) + " open"))
 	b.WriteString(" • ")
 	b.WriteString(styles.Dim.Render("ESC exit"))
 	b.WriteString("\n")

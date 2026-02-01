@@ -24,6 +24,14 @@ type Config struct {
 	AutoSelect        bool   `mapstructure:"auto_select"`
 	AutoContinue      bool   `mapstructure:"auto_continue"`
 
+	// Keybindings
+	KeyWidget string `mapstructure:"key_widget"`
+	KeyOpen   string `mapstructure:"key_open"`
+
+	// Display options
+	ShowFolder bool `mapstructure:"show_folder"`
+	ShowFile   bool `mapstructure:"show_file"`
+
 	// Colors
 	Colors ColorConfig
 
@@ -66,6 +74,10 @@ var defaults = struct {
 	requireCheatBlock bool
 	autoSelect        bool
 	autoContinue      bool
+	keyWidget         string
+	keyOpen           string
+	showFolder        bool
+	showFile          bool
 	colors            ColorConfig
 	columns           ColumnConfig
 }{
@@ -78,6 +90,10 @@ var defaults = struct {
 	requireCheatBlock: false,
 	autoSelect:        false,
 	autoContinue:      false,
+	keyWidget:         "\\C-g",  // Ctrl+G for shell widgets
+	keyOpen:           "ctrl+o", // Ctrl+O in TUI
+	showFolder:        true,
+	showFile:          true,
 	colors: ColorConfig{
 		Header:   "36",  // Cyan
 		Command:  "32",  // Green
@@ -133,6 +149,14 @@ func setDefaults() {
 	viper.SetDefault("require_cheat_block", defaults.requireCheatBlock)
 	viper.SetDefault("auto_select", defaults.autoSelect)
 	viper.SetDefault("auto_continue", defaults.autoContinue)
+
+	// Keybindings
+	viper.SetDefault("key_widget", defaults.keyWidget)
+	viper.SetDefault("key_open", defaults.keyOpen)
+
+	// Display options
+	viper.SetDefault("show_folder", defaults.showFolder)
+	viper.SetDefault("show_file", defaults.showFile)
 
 	// Colors
 	viper.SetDefault("color_header", defaults.colors.Header)
@@ -213,6 +237,34 @@ func GetAutoSelect() bool {
 // GetAutoContinue returns whether to auto-continue when vars are prefilled from environment
 func GetAutoContinue() bool {
 	return viper.GetBool("auto_continue")
+}
+
+// ============================================================================
+// Getters - Keybindings
+// ============================================================================
+
+// GetKeyWidget returns the keybinding for shell widget activation (e.g., "\C-g" for Ctrl+G)
+func GetKeyWidget() string {
+	return viper.GetString("key_widget")
+}
+
+// GetKeyOpen returns the keybinding for opening markdown in editor (e.g., "ctrl+o")
+func GetKeyOpen() string {
+	return viper.GetString("key_open")
+}
+
+// ============================================================================
+// Getters - Display Options
+// ============================================================================
+
+// GetShowFolder returns whether to show folder in title/list
+func GetShowFolder() bool {
+	return viper.GetBool("show_folder")
+}
+
+// GetShowFile returns whether to show file in title/list
+func GetShowFile() bool {
+	return viper.GetBool("show_file")
 }
 
 // ============================================================================
