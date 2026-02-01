@@ -1009,13 +1009,34 @@ func (m mainModel) View() string {
 // renderCheatSelect builds the cheat selection view
 func (m mainModel) renderCheatSelect() string {
 	width := maxInt(m.width, 80)
-	height := maxInt(m.height, 24)
-
-	preview := m.renderPreview(width)
-	previewLines := countLines(preview)
+	height := m.height
+	if height < 1 {
+		height = 24 // fallback for uninitialized
+	}
 
 	inputLines := 3 // divider + info + input
-	listHeight := maxInt(height-previewLines-inputLines, 3)
+
+	// Calculate available space for preview and list
+	// Preview can shrink if terminal is very small
+	previewHeight := config.GetPreviewHeight()
+	if previewHeight < 1 {
+		previewHeight = 6
+	}
+
+	// Minimum list height we want to show
+	minListHeight := 3
+
+	// If terminal is too small, shrink preview first
+	availableForPreviewAndList := height - inputLines
+	if availableForPreviewAndList < previewHeight+minListHeight {
+		// Shrink preview to fit, keeping at least 2 lines for preview
+		previewHeight = maxInt(availableForPreviewAndList-minListHeight, 2)
+	}
+
+	preview := m.renderPreviewWithHeight(width, previewHeight)
+	previewLines := countLines(preview)
+
+	listHeight := maxInt(height-previewLines-inputLines, 1)
 	list := m.renderList(listHeight)
 	listLines := countLines(list)
 
@@ -1031,44 +1052,55 @@ func (m mainModel) renderCheatSelect() string {
 	return b.String()
 }
 
-// renderPreview renders the preview section for the selected cheat
+// renderPreview renders the preview section for the selected cheat using config height
 func (m mainModel) renderPreview(width int) string {
-	b := getBuilder()
-	defer putBuilder(b)
-	lines := 0
 	maxLines := config.GetPreviewHeight()
 	if maxLines < 1 {
 		maxLines = 6 // fallback default
 	}
+	return m.renderPreviewWithHeight(width, maxLines)
+}
+
+// renderPreviewWithHeight renders the preview section with a specific height
+func (m mainModel) renderPreviewWithHeight(width int, maxLines int) string {
+	b := getBuilder()
+	defer putBuilder(b)
+	lines := 0
 
 	if m.cursor < len(m.filtered) {
 		item := m.filtered[m.cursor]
 		pathDisplay := buildPathDisplay(item.folder, item.file)
-		if pathDisplay != "" {
+		if pathDisplay != "" && lines < maxLines {
 			b.WriteString(styles.PreviewPath.Render(pathDisplay))
 			b.WriteString("\n")
 			lines++
 		}
 
-		b.WriteString(styles.PreviewHeader.Render(item.cheat.Header))
-		b.WriteString("\n")
-		lines++
+		if lines < maxLines {
+			b.WriteString(styles.PreviewHeader.Render(item.cheat.Header))
+			b.WriteString("\n")
+			lines++
+		}
 
-		if item.cheat.Description != "" {
+		if item.cheat.Description != "" && lines < maxLines {
 			desc := truncateLines(item.cheat.Description, 1, 200)
 			b.WriteString(styles.PreviewDesc.Render(desc))
 			b.WriteString("\n")
 			lines++
 		}
 
-		b.WriteString("\n")
-		lines++
+		if lines < maxLines {
+			b.WriteString("\n")
+			lines++
+		}
 
-		cmd := truncateLines(item.cheat.Command, maxLines-lines, 0)
-		cmdLines := strings.Count(cmd, "\n") + 1
-		b.WriteString(styles.PreviewCmd.Render(cmd))
-		b.WriteString("\n")
-		lines += cmdLines
+		if lines < maxLines {
+			cmd := truncateLines(item.cheat.Command, maxLines-lines, 0)
+			cmdLines := strings.Count(cmd, "\n") + 1
+			b.WriteString(styles.PreviewCmd.Render(cmd))
+			b.WriteString("\n")
+			lines += cmdLines
+		}
 	}
 
 	// Pad to fixed height
