@@ -176,10 +176,9 @@ func selectVariant(variants []parser.VarDef, scope map[string]string) *parser.Va
 func evaluateCondition(condition string, scope map[string]string) bool {
 	condition = strings.TrimSpace(condition)
 
-	// Substitute variables in condition
-	for name, value := range scope {
-		condition = strings.ReplaceAll(condition, "$"+name, value)
-	}
+	// Substitute variables in condition (longest names first to prevent
+	// prefix collisions, e.g. $s matching inside $scheme).
+	condition = executor.SubstituteVars(condition, scope)
 
 	// Check for comparison operators
 	if strings.Contains(condition, "==") {
@@ -208,15 +207,6 @@ func evaluateCondition(condition string, scope map[string]string) bool {
 func replaceVar(cmd, varName, replacement string) string {
 	re := regexp.MustCompile(`\$` + regexp.QuoteMeta(varName) + `\b`)
 	return re.ReplaceAllLiteralString(cmd, replacement)
-}
-
-// selectorOptions holds parsed selector arguments
-type selectorOptions struct {
-	header       string
-	delimiter    string
-	column       int    // 1-indexed, 0 means all columns (display column)
-	selectColumn int    // 1-indexed, 0 means use column or full line (return column)
-	mapCmd       string // command to transform selected value
 }
 
 // extractCustomHeader parses --header from selector args
@@ -251,9 +241,9 @@ func executeOutput(command string, exec *executor.Executor) error {
 	switch config.GetOutput() {
 	case "exec":
 		fmt.Fprintf(os.Stderr, "\033[1;32m▶ Executing:\033[0m %s\n", finalCmd)
-		return exec.Execute(finalCmd)
+		return exec.OutputWithMode(finalCmd, executor.OutputExec)
 	case "copy":
-		if err := copyToClipboard(finalCmd); err != nil {
+		if err := exec.OutputWithMode(finalCmd, executor.OutputCopy); err != nil {
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "\033[1;33m✓ Copied to clipboard\033[0m\n")
@@ -262,34 +252,6 @@ func executeOutput(command string, exec *executor.Executor) error {
 		fmt.Print(finalCmd)
 		return nil
 	}
-}
-
-// copyToClipboard copies text to the system clipboard
-func copyToClipboard(text string) error {
-	var copyCmd *exec.Cmd
-
-	switch {
-	case commandExists("wl-copy"):
-		copyCmd = exec.Command("wl-copy")
-	case commandExists("xclip"):
-		copyCmd = exec.Command("xclip", "-selection", "clipboard")
-	case commandExists("xsel"):
-		copyCmd = exec.Command("xsel", "--clipboard", "--input")
-	case commandExists("pbcopy"):
-		copyCmd = exec.Command("pbcopy")
-	default:
-		fmt.Print(text)
-		return nil
-	}
-
-	copyCmd.Stdin = strings.NewReader(text)
-	return copyCmd.Run()
-}
-
-// commandExists checks if a command is available in PATH
-func commandExists(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
 }
 
 // ============================================================================
@@ -415,22 +377,22 @@ func parseShellArgs(s string) []string {
 }
 
 // applyMapTransform transforms the selected value based on options
-func applyMapTransform(value string, opts selectorOptions) string {
+func applyMapTransform(value string, opts SelectOptions) string {
 	// Apply select-column extraction first
-	if opts.selectColumn > 0 && opts.delimiter != "" {
-		parts := strings.Split(value, opts.delimiter)
-		if opts.selectColumn <= len(parts) {
-			value = strings.TrimSpace(parts[opts.selectColumn-1])
+	if opts.SelectColumn > 0 && opts.Delimiter != "" {
+		parts := strings.Split(value, opts.Delimiter)
+		if opts.SelectColumn <= len(parts) {
+			value = strings.TrimSpace(parts[opts.SelectColumn-1])
 		}
 	}
 
 	// Then apply map command if present
-	if opts.mapCmd == "" {
+	if opts.MapCmd == "" {
 		return value
 	}
 
 	// Run the map command with the value as stdin
-	cmd := exec.Command(config.GetShell(), "-c", opts.mapCmd)
+	cmd := exec.Command(config.GetShell(), "-c", opts.MapCmd)
 	cmd.Stdin = strings.NewReader(value)
 	out, err := cmd.Output()
 	if err != nil {

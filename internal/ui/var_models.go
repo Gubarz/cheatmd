@@ -2,13 +2,11 @@ package ui
 
 import (
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/gubarz/cheatmd/internal/config"
 )
 
 // ============================================================================
@@ -17,9 +15,10 @@ import (
 
 // SelectOptions holds display options for selection
 type SelectOptions struct {
-	Delimiter string
-	Column    int    // 1-indexed, 0 = all
-	MapCmd    string // command to transform selected value
+	Delimiter    string
+	Column       int    // 1-indexed, 0 = all (display column)
+	SelectColumn int    // 1-indexed, 0 = no extraction (return full/original line)
+	MapCmd       string // command to transform selected value
 }
 
 // varSelectModel is for selecting from a list of options
@@ -102,9 +101,9 @@ func (m varSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.textInput.Width = msg.Width - 4
+		m.width = maxInt(msg.Width, 1)
+		m.height = maxInt(msg.Height, 1)
+		m.textInput.Width = safeTextInputWidth(m.width)
 	}
 
 	var cmd tea.Cmd
@@ -314,9 +313,9 @@ func (m varInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.textInput.Width = msg.Width - 4
+		m.width = maxInt(msg.Width, 1)
+		m.height = maxInt(msg.Height, 1)
+		m.textInput.Width = safeTextInputWidth(m.width)
 	}
 
 	var cmd tea.Cmd
@@ -402,12 +401,12 @@ func (m varInputModel) renderBottom(width int) string {
 // SelectWithTUI displays options for variable selection
 // Returns (value, goBack, error) - if value is "__EXIT__" caller should exit completely
 func SelectWithTUI(varName string, options []string, header, customHeader, prefill, filePath string) (string, bool, error) {
-	return SelectWithTUIOptions(varName, options, header, customHeader, prefill, filePath, selectorOptions{})
+	return SelectWithTUIOptions(varName, options, header, customHeader, prefill, filePath, SelectOptions{})
 }
 
 // SelectWithTUIOptions displays options for variable selection with display options
 // Returns (value, goBack, error) - if value is "__EXIT__" caller should exit completely
-func SelectWithTUIOptions(varName string, options []string, header, customHeader, prefill, filePath string, opts selectorOptions) (string, bool, error) {
+func SelectWithTUIOptions(varName string, options []string, header, customHeader, prefill, filePath string, opts SelectOptions) (string, bool, error) {
 	debug := os.Getenv("CHEATMD_DEBUG") != ""
 	var start time.Time
 
@@ -427,13 +426,7 @@ func SelectWithTUIOptions(varName string, options []string, header, customHeader
 	}
 	defer cleanup()
 
-	selectOpts := SelectOptions{
-		Delimiter: opts.delimiter,
-		Column:    opts.column,
-		MapCmd:    opts.mapCmd,
-	}
-
-	m := newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, filePath, selectOpts)
+	m := newVarSelectModelWithOpts(varName, options, header, customHeader, prefill, filePath, opts)
 	if debug {
 		os.Stderr.WriteString("[DEBUG] newVarSelectModel: " + time.Since(start).String() + "\n")
 		start = time.Now()
@@ -461,35 +454,8 @@ func SelectWithTUIOptions(varName string, options []string, header, customHeader
 		return "", true, nil
 	}
 
-	// Apply select-column extraction if specified
-	selected := result.selected
-	if opts.selectColumn > 0 && opts.delimiter != "" {
-		parts := strings.Split(selected, opts.delimiter)
-		if opts.selectColumn <= len(parts) {
-			selected = strings.TrimSpace(parts[opts.selectColumn-1])
-		}
-	}
-
-	// Apply map transform if specified
-	if opts.mapCmd != "" {
-		selected = applyMapTransformCmd(selected, opts.mapCmd)
-	}
-
+	selected := applyMapTransform(result.selected, opts)
 	return selected, false, nil
-}
-
-// applyMapTransformCmd runs the map command on the selected value
-func applyMapTransformCmd(value, mapCmd string) string {
-	if mapCmd == "" {
-		return value
-	}
-	cmd := exec.Command(config.GetShell(), "-c", mapCmd)
-	cmd.Stdin = strings.NewReader(value)
-	out, err := cmd.Output()
-	if err != nil {
-		return value // fallback to original on error
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // PromptWithTUI displays an input prompt for variable entry

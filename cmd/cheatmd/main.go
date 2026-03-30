@@ -91,9 +91,9 @@ _cheatmd_widget() {
 
    local output
    if [ -z "${input}" ]; then
-      output="$(cheatmd --print)"
+      output="$(cheatmd --print)" || return
    else
-      output="$(cheatmd --print --match "$input")"
+      output="$(cheatmd --print --match "$input")" || return
    fi
 
    if [ -n "$output" ]; then
@@ -121,9 +121,9 @@ _cheatmd_widget() {
 
    local output
    if [ -z "$input" ]; then
-      output="$(cheatmd --print)"
+      output="$(cheatmd --print)" || return
    else
-      output="$(cheatmd --print --match "$input")"
+      output="$(cheatmd --print --match "$input")" || return
    fi
 
    if [ -n "$output" ]; then
@@ -145,11 +145,19 @@ func fishWidget() string {
 	fishKey := convertToFishKey(keyWidget)
 	return fmt.Sprintf(`function _cheatmd_widget
    set -l input (commandline)
+   set -l output
+   set -l cmd_status 0
 
    if test -z "$input"
       set output (cheatmd --print)
+      set cmd_status $status
    else
       set output (cheatmd --print --match "$input")
+      set cmd_status $status
+   end
+
+   if test $cmd_status -ne 0
+      return
    end
 
    if test -n "$output"

@@ -257,9 +257,9 @@ func (m mainModel) Init() tea.Cmd {
 func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle window size for both phases
 	if wsMsg, ok := msg.(tea.WindowSizeMsg); ok {
-		m.width = wsMsg.Width
-		m.height = wsMsg.Height
-		m.textInput.Width = wsMsg.Width - 4
+		m.width = maxInt(wsMsg.Width, 1)
+		m.height = maxInt(wsMsg.Height, 1)
+		m.textInput.Width = safeTextInputWidth(m.width)
 	}
 
 	// Dispatch based on phase
@@ -522,10 +522,7 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 
 	// Handle literal values (no shell execution)
 	if vs.def.Literal != "" {
-		result := vs.def.Literal
-		for name, value := range scope {
-			result = strings.ReplaceAll(result, "$"+name, value)
-		}
+		result := executor.SubstituteVars(vs.def.Literal, scope)
 		// If user went back to this var, show it instead of auto-resolving
 		if vs.skipAutoCont {
 			m.varState.isPromptOnly = true
@@ -554,10 +551,7 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 	}
 
 	// Run shell command asynchronously to get options
-	shellCmd := vs.def.Shell
-	for name, value := range scope {
-		shellCmd = strings.ReplaceAll(shellCmd, "$"+name, value)
-	}
+	shellCmd := executor.SubstituteVars(vs.def.Shell, scope)
 
 	return func() tea.Msg {
 		output, err := m.executor.RunShell(shellCmd)
@@ -587,6 +581,11 @@ func parseSelectorOpts(selectorArgs string) SelectOptions {
 		case "--column":
 			if i+1 < len(args) {
 				fmt.Sscanf(args[i+1], "%d", &opts.Column)
+				i++
+			}
+		case "--select-column":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &opts.SelectColumn)
 				i++
 			}
 		case "--map":
@@ -657,9 +656,7 @@ func (m mainModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
 		m.varState.isPromptOnly = true
 		prefill := vs.prefill
 		if prefill == "" {
-			prefill = applyMapTransform(msg.options[0], selectorOptions{
-				mapCmd: m.varState.selectOpts.MapCmd,
-			})
+			prefill = applyMapTransform(msg.options[0], m.varState.selectOpts)
 		}
 		m.textInput.SetValue(prefill)
 		m.textInput.CursorEnd()
@@ -835,21 +832,7 @@ func (m *mainModel) acceptVarValue() tea.Cmd {
 		// Selected from list - get original value
 		selected := m.varState.filtered[m.cursor].original
 
-		// Apply select-column if specified
-		opts := m.varState.selectOpts
-		if opts.Column > 0 && opts.Delimiter != "" {
-			parts := strings.Split(selected, opts.Delimiter)
-			if opts.Column <= len(parts) {
-				selected = strings.TrimSpace(parts[opts.Column-1])
-			}
-		}
-
-		// Apply map transform if specified
-		if opts.MapCmd != "" {
-			selected = applyMapTransformCmd(selected, opts.MapCmd)
-		}
-
-		value = selected
+		value = applyMapTransform(selected, m.varState.selectOpts)
 	} else {
 		// Use typed input
 		value = m.textInput.Value()
@@ -1423,6 +1406,12 @@ func maxInt(a, b int) int {
 	return b
 }
 
+// safeTextInputWidth clamps text input width to a positive value.
+// Terminal APIs can briefly report very small/zero sizes in edge cases.
+func safeTextInputWidth(totalWidth int) int {
+	return maxInt(totalWidth-4, 1)
+}
+
 // countLines counts the number of lines in a string
 func countLines(s string) int {
 	if s == "" {
@@ -1662,10 +1651,7 @@ func inferDependentVars(cheat *parser.Cheat, index *parser.CheatIndex) {
 				}
 
 				// Check if this literal (with current scope) would produce the prefilled value
-				literalResult := def.Literal
-				for scopeVar, scopeVal := range cheat.Scope {
-					literalResult = strings.ReplaceAll(literalResult, "$"+scopeVar, scopeVal)
-				}
+				literalResult := executor.SubstituteVars(def.Literal, cheat.Scope)
 
 				// If literal still has unresolved vars, try to extract them
 				if strings.Contains(literalResult, "$") {
@@ -1678,10 +1664,7 @@ func inferDependentVars(cheat *parser.Cheat, index *parser.CheatIndex) {
 						}
 					}
 					// Recompute literal with new extractions
-					literalResult = def.Literal
-					for scopeVar, scopeVal := range cheat.Scope {
-						literalResult = strings.ReplaceAll(literalResult, "$"+scopeVar, scopeVal)
-					}
+					literalResult = executor.SubstituteVars(def.Literal, cheat.Scope)
 				}
 
 				// Check if the resolved literal matches the prefilled value

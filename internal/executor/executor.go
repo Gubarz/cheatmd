@@ -5,11 +5,25 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/gubarz/cheatmd/internal/config"
 	"github.com/gubarz/cheatmd/internal/parser"
 )
+
+// sortedNames returns variable names sorted longest-first to prevent
+// prefix collisions during substitution (e.g., $s matching inside $scheme).
+func sortedNames(scope map[string]string) []string {
+	names := make([]string, 0, len(scope))
+	for name := range scope {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return len(names[i]) > len(names[j])
+	})
+	return names
+}
 
 // ============================================================================
 // Shell Runner Interface
@@ -149,12 +163,7 @@ func (e *Executor) Execute(command string) error {
 
 // BuildFinalCommand substitutes all variables in a cheat's command
 func (e *Executor) BuildFinalCommand(cheat *parser.Cheat) string {
-	result := cheat.Command
-
-	// Substitute all scope variables
-	for name, value := range cheat.Scope {
-		result = strings.ReplaceAll(result, "$"+name, value)
-	}
+	result := SubstituteVars(cheat.Command, cheat.Scope)
 
 	// Handle escaped dollar signs
 	result = strings.ReplaceAll(result, "\\$", "$")
@@ -164,8 +173,8 @@ func (e *Executor) BuildFinalCommand(cheat *parser.Cheat) string {
 
 // SubstituteVars replaces variables in a string using the given scope
 func SubstituteVars(s string, scope map[string]string) string {
-	for name, value := range scope {
-		s = strings.ReplaceAll(s, "$"+name, value)
+	for _, name := range sortedNames(scope) {
+		s = strings.ReplaceAll(s, "$"+name, scope[name])
 	}
 	return s
 }
