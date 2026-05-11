@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var version = "0.1.6"
+var version = "0.1.7"
 
 var widgetCmd = &cobra.Command{
 	Use:   "widget [shell]",
