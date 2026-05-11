@@ -25,8 +25,12 @@ type Config struct {
 	AutoContinue      bool   `mapstructure:"auto_continue"`
 
 	// Keybindings
-	KeyWidget string `mapstructure:"key_widget"`
-	KeyOpen   string `mapstructure:"key_open"`
+	KeyWidget     string `mapstructure:"key_widget"`
+	KeyOpen       string `mapstructure:"key_open"`
+	KeySubstitute string `mapstructure:"key_substitute"`
+
+	// Substitute search
+	SubstituteSources []string `mapstructure:"substitute_sources"`
 
 	// Display options
 	ShowFolder    bool `mapstructure:"show_folder"`
@@ -77,6 +81,8 @@ var defaults = struct {
 	autoContinue      bool
 	keyWidget         string
 	keyOpen           string
+	keySubstitute     string
+	substituteSources []string
 	showFolder        bool
 	showFile          bool
 	previewHeight     int
@@ -92,8 +98,10 @@ var defaults = struct {
 	requireCheatBlock: false,
 	autoSelect:        false,
 	autoContinue:      false,
-	keyWidget:         "\\C-g",  // Ctrl+G for shell widgets
-	keyOpen:           "ctrl+o", // Ctrl+O in TUI
+	keyWidget:         "\\C-g",            // Ctrl+G for shell widgets
+	keyOpen:           "ctrl+o",           // Ctrl+O in TUI
+	keySubstitute:     "ctrl+t",           // Ctrl+T opens substitute search during var resolution
+	substituteSources: []string{"env", "history"},
 	showFolder:        true,
 	showFile:          true,
 	previewHeight:     6,
@@ -156,6 +164,10 @@ func setDefaults() {
 	// Keybindings
 	viper.SetDefault("key_widget", defaults.keyWidget)
 	viper.SetDefault("key_open", defaults.keyOpen)
+	viper.SetDefault("key_substitute", defaults.keySubstitute)
+
+	// Substitute search
+	viper.SetDefault("substitute_sources", defaults.substituteSources)
 
 	// Display options
 	viper.SetDefault("show_folder", defaults.showFolder)
@@ -255,6 +267,18 @@ func GetKeyWidget() string {
 // GetKeyOpen returns the keybinding for opening markdown in editor (e.g., "ctrl+o")
 func GetKeyOpen() string {
 	return viper.GetString("key_open")
+}
+
+// GetKeySubstitute returns the keybinding for opening the substitute search
+// during variable resolution (e.g., "ctrl+t").
+func GetKeySubstitute() string {
+	return viper.GetString("key_substitute")
+}
+
+// GetSubstituteSources returns the enabled sources for substitute search.
+// Valid entries: "env", "history". Empty disables the feature.
+func GetSubstituteSources() []string {
+	return viper.GetStringSlice("substitute_sources")
 }
 
 // ============================================================================

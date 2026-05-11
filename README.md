@@ -119,7 +119,22 @@ output: print          # print, copy, exec
 shell: /bin/bash
 require_cheat_block: false
 auto_continue: false   # Auto-accept env vars without prompting
+
+# Substitute search (while resolving a variable, press Ctrl-T to fuzzy-search
+# environment variables and shell history for a value to insert)
+key_substitute: "ctrl+t"
+substitute_sources: ["env", "history"]   # set to [] to disable
 ```
+
+### Substitute search
+
+When a cheat asks for a variable (say `$host`), press `Ctrl-T` to open a
+fuzzy-search picker over your environment variables and any assignments
+(`VAR=value`, `export VAR=value`, `declare -x VAR=value`, leading inline
+assignments) found in shell history. Plain commands in history are ignored.
+Pick a row, its value is loaded into the prompt; press `Enter` to accept or
+edit it first. `Esc` cancels back to the var prompt. History is read from
+`$HISTFILE`, falling back to `~/.bash_history` or `~/.zsh_history`.
 
 ## DSL
 

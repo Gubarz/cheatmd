@@ -15,6 +15,13 @@ shell: /bin/bash
 # key_open: TUI key for opening markdown in editor (e.g., ctrl+o, ctrl+e)
 key_widget: "\\C-g"
 key_open: "ctrl+o"
+# key_substitute: opens a fuzzy search of env vars + shell history during
+# variable resolution, lets you pick a value to substitute into the prompt.
+key_substitute: "ctrl+t"
+
+# Substitute search sources. Valid entries: "env", "history".
+# Empty list disables the feature.
+substitute_sources: ["env", "history"]
 
 # Display options
 # Control what appears in the title/list path column
