@@ -403,6 +403,9 @@ type parseState struct {
 	inCheatBlock      bool
 	cheatBlockBuf     []byte
 	pendingCodeBlocks []codeBlock
+	fileTags          []string // tags from front matter + footer
+	currentHeaderTags []string // inline #tags under the current header
+	headerCheats      []*Cheat // cheats already created under the current header
 }
 
 // codeBlock represents a parsed code block
@@ -416,6 +419,8 @@ type codeBlock struct {
 func (s *parseState) reset(newHeader string) {
 	s.currentHeader = newHeader
 	s.pendingCodeBlocks = s.pendingCodeBlocks[:0]
+	s.currentHeaderTags = s.currentHeaderTags[:0]
+	s.headerCheats = s.headerCheats[:0]
 }
 
 // parseStatePool reduces allocations by reusing parseState objects
@@ -439,6 +444,9 @@ func getParseState() *parseState {
 	s.inCheatBlock = false
 	s.cheatBlockBuf = s.cheatBlockBuf[:0]
 	s.pendingCodeBlocks = s.pendingCodeBlocks[:0]
+	s.fileTags = s.fileTags[:0]
+	s.currentHeaderTags = s.currentHeaderTags[:0]
+	s.headerCheats = s.headerCheats[:0]
 	return s
 }
 
@@ -462,21 +470,27 @@ func (p *Parser) parseLines(path string, data []byte) {
 	state := getParseState()
 	defer putParseState(state)
 
+	// Extract front matter and footer YAML blocks before line parsing
+	body, frontTags := extractFrontMatterTags(data)
+	body, footerTags := extractFooterTags(body)
+	state.fileTags = append(state.fileTags, frontTags...)
+	state.fileTags = append(state.fileTags, footerTags...)
+
 	// Process line by line without allocating []string
 	start := 0
-	for i := 0; i <= len(data); i++ {
-		if i == len(data) || data[i] == '\n' {
+	for i := 0; i <= len(body); i++ {
+		if i == len(body) || body[i] == '\n' {
 			end := i
-			if end > start && data[end-1] == '\r' {
+			if end > start && body[end-1] == '\r' {
 				end--
 			}
-			p.parseLine(path, data[start:end], state)
+			p.parseLine(path, body[start:end], state)
 			start = i + 1
 		}
 	}
 
 	// Process remaining pending blocks
-	p.processPendingBlocks(path, state.currentHeader, state.pendingCodeBlocks)
+	p.processPendingBlocks(path, state)
 }
 
 // parseLine processes a single line (as bytes, no allocation)
@@ -525,7 +539,7 @@ func (p *Parser) parseLine(path string, line []byte, s *parseState) {
 	// Header - starts with #
 	if first == '#' {
 		if header, ok := parseHeader(line); ok {
-			p.processPendingBlocks(path, s.currentHeader, s.pendingCodeBlocks)
+			p.processPendingBlocks(path, s)
 			s.reset(header)
 			return
 		}
@@ -556,6 +570,38 @@ func (p *Parser) parseLine(path string, line []byte, s *parseState) {
 			return
 		}
 	}
+
+	// Prose line: scan for inline #tag tokens and attach to current header
+	if s.currentHeader != "" && bytes.IndexByte(line, '#') >= 0 {
+		before := len(s.currentHeaderTags)
+		scanInlineTags(line, &s.currentHeaderTags)
+		if len(s.currentHeaderTags) > before && len(s.headerCheats) > 0 {
+			newTags := s.currentHeaderTags[before:]
+			for _, c := range s.headerCheats {
+				c.Tags = mergeTags(c.Tags, newTags)
+			}
+		}
+	}
+}
+
+// mergeTags appends newTags to existing, lowercasing and deduping in place.
+func mergeTags(existing []string, newTags []string) []string {
+	seen := make(map[string]struct{}, len(existing)+len(newTags))
+	for _, t := range existing {
+		seen[t] = struct{}{}
+	}
+	for _, t := range newTags {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" {
+			continue
+		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		existing = append(existing, t)
+	}
+	return existing
 }
 
 // parseHeader extracts header text without regex: "## Header" -> "Header"
@@ -683,7 +729,7 @@ func (p *Parser) processCheatComment(path string, s *parseState, content string)
 	}
 	lastIdx := len(s.pendingCodeBlocks) - 1
 	block := s.pendingCodeBlocks[lastIdx]
-	cheat := p.createCheat(path, s.currentHeader, block.description, block.content, content, true)
+	cheat := p.createCheat(path, s, block.description, block.content, content, true)
 	p.index.AddCheat(cheat)
 	p.index.RegisterModule(cheat)
 	s.pendingCodeBlocks = s.pendingCodeBlocks[:lastIdx]
@@ -696,13 +742,13 @@ func (p *Parser) processCheatBlock(path string, s *parseState) {
 	if len(s.pendingCodeBlocks) > 0 {
 		lastIdx := len(s.pendingCodeBlocks) - 1
 		block := s.pendingCodeBlocks[lastIdx]
-		cheat := p.createCheat(path, s.currentHeader, block.description, block.content, content, true)
+		cheat := p.createCheat(path, s, block.description, block.content, content, true)
 		p.index.AddCheat(cheat)
 		p.index.RegisterModule(cheat)
 		s.pendingCodeBlocks = s.pendingCodeBlocks[:lastIdx]
 	} else {
 		// Standalone cheat block (module definition)
-		cheat := p.createCheat(path, s.currentHeader, "", "", content, true)
+		cheat := p.createCheat(path, s, "", "", content, true)
 		if cheat.Export != "" {
 			p.index.RegisterModule(cheat)
 		}
@@ -710,10 +756,10 @@ func (p *Parser) processCheatBlock(path string, s *parseState) {
 }
 
 // processPendingBlocks processes remaining code blocks without cheat metadata
-func (p *Parser) processPendingBlocks(path, header string, blocks []codeBlock) {
-	for _, block := range blocks {
+func (p *Parser) processPendingBlocks(path string, s *parseState) {
+	for _, block := range s.pendingCodeBlocks {
 		if IsShellLanguage(block.lang) && block.content != "" {
-			cheat := p.createCheat(path, header, block.description, block.content, "", false)
+			cheat := p.createCheat(path, s, block.description, block.content, "", false)
 			p.index.AddCheat(cheat)
 		}
 	}
@@ -724,18 +770,64 @@ func (p *Parser) processPendingBlocks(path, header string, blocks []codeBlock) {
 // ============================================================================
 
 // createCheat creates a new cheat from parsed data
-func (p *Parser) createCheat(path, header, description, command, cheatBlock string, hasCheatBlock bool) *Cheat {
-	cheat := NewCheat(path, header)
+func (p *Parser) createCheat(path string, s *parseState, description, command, cheatBlock string, hasCheatBlock bool) *Cheat {
+	cheat := NewCheat(path, s.currentHeader)
 	cheat.Description = strings.TrimSpace(description)
 	cheat.Command = command
 	cheat.HasCheatBlock = hasCheatBlock
-	cheat.Tags = p.getTagsForPath(path, header)
+	cheat.Tags = p.buildCheatTags(path, s)
 
 	if cheatBlock != "" {
 		parseCheatDSL(cheat, cheatBlock)
 	}
 
+	s.headerCheats = append(s.headerCheats, cheat)
 	return cheat
+}
+
+// buildCheatTags merges all tag sources for one cheat: path tags, heading-suffix
+// tag, file-level tags (front matter + footer), and per-cheat inline #tags.
+// Result is lowercased and deduplicated.
+//
+// Fast paths avoid allocation when there are no extra tag sources or when
+// extras are guaranteed not to duplicate path tags.
+func (p *Parser) buildCheatTags(path string, s *parseState) []string {
+	pathTags := p.getTagsForPath(path, s.currentHeader)
+
+	extra := len(s.fileTags) + len(s.currentHeaderTags)
+	if extra == 0 {
+		return pathTags
+	}
+
+	out := make([]string, len(pathTags), len(pathTags)+extra)
+	copy(out, pathTags)
+
+	var seen map[string]struct{}
+	appendUnique := func(tag string) {
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		if tag == "" {
+			return
+		}
+		if seen == nil {
+			seen = make(map[string]struct{}, len(pathTags)+extra)
+			for _, t := range pathTags {
+				seen[t] = struct{}{}
+			}
+		}
+		if _, ok := seen[tag]; ok {
+			return
+		}
+		seen[tag] = struct{}{}
+		out = append(out, tag)
+	}
+
+	for _, t := range s.fileTags {
+		appendUnique(t)
+	}
+	for _, t := range s.currentHeaderTags {
+		appendUnique(t)
+	}
+	return out
 }
 
 // getTagsForPath returns cached path tags plus header tag
@@ -844,6 +936,342 @@ func joinContinuationLines(lines []string) []string {
 	}
 
 	return result
+}
+
+// ============================================================================
+// Tag Extraction
+// ============================================================================
+
+// extractFrontMatterTags strips a leading YAML front-matter block (--- ... ---)
+// from data and returns the remainder plus any tags found.
+func extractFrontMatterTags(data []byte) ([]byte, []string) {
+	// Must start with "---" followed by newline (allow optional BOM/whitespace).
+	i := 0
+	for i < len(data) && (data[i] == ' ' || data[i] == '\t' || data[i] == '\r') {
+		i++
+	}
+	if i+3 > len(data) || data[i] != '-' || data[i+1] != '-' || data[i+2] != '-' {
+		return data, nil
+	}
+	// After "---" we require newline (allow trailing spaces).
+	j := i + 3
+	for j < len(data) && (data[j] == ' ' || data[j] == '\t' || data[j] == '\r') {
+		j++
+	}
+	if j >= len(data) || data[j] != '\n' {
+		return data, nil
+	}
+	bodyStart := j + 1
+
+	// Find closing "---" at the start of a line.
+	closeStart, closeEnd, ok := findYAMLClose(data, bodyStart)
+	if !ok {
+		return data, nil
+	}
+
+	tags := parseYAMLTags(data[bodyStart:closeStart])
+	return data[closeEnd:], tags
+}
+
+// extractFooterTags strips a trailing tag block from data and returns the
+// remainder plus any tags found. Two shapes are recognized:
+//
+//  1. YAML footer:  --- \n tags: [...] \n ---
+//  2. Hashtag footer: optional --- rule, then one or more lines of
+//     whitespace-separated #tag tokens
+//
+// Walks backward from end-of-file; stops at the first non-tag, non-rule,
+// non-blank line.
+func extractFooterTags(data []byte) ([]byte, []string) {
+	// Trim trailing whitespace.
+	end := len(data)
+	for end > 0 && (data[end-1] == '\n' || data[end-1] == '\r' || data[end-1] == ' ' || data[end-1] == '\t') {
+		end--
+	}
+	if end == 0 {
+		return data, nil
+	}
+
+	// Try YAML form first.
+	if body, tags, ok := extractYAMLFooter(data, end); ok {
+		return body, tags
+	}
+
+	// Try hashtag form.
+	if body, tags, ok := extractHashtagFooter(data, end); ok {
+		return body, tags
+	}
+
+	return data, nil
+}
+
+// extractYAMLFooter recognizes a trailing --- ... --- YAML block.
+func extractYAMLFooter(data []byte, end int) ([]byte, []string, bool) {
+	if end < 3 {
+		return nil, nil, false
+	}
+	if data[end-1] != '-' || data[end-2] != '-' || data[end-3] != '-' {
+		return nil, nil, false
+	}
+	if end-3 > 0 && data[end-4] != '\n' {
+		return nil, nil, false
+	}
+
+	openEnd := end - 3
+	openStart := openEnd
+	for openStart > 0 {
+		lineEnd := openStart
+		lineStart := lineEnd
+		for lineStart > 0 && data[lineStart-1] != '\n' {
+			lineStart--
+		}
+		line := bytes.TrimRight(data[lineStart:lineEnd], " \t\r")
+		if bytes.Equal(line, []byte("---")) && lineStart != openEnd-3 {
+			tags := parseYAMLTags(data[lineEnd+1 : openEnd])
+			return data[:lineStart], tags, true
+		}
+		if lineStart == 0 {
+			break
+		}
+		openStart = lineStart - 1
+	}
+	return nil, nil, false
+}
+
+// extractHashtagFooter recognizes a trailing block of #tag lines, optionally
+// preceded by a "---" horizontal rule.
+func extractHashtagFooter(data []byte, end int) ([]byte, []string, bool) {
+	var tags []string
+	cut := end
+	sawTagLine := false
+
+	for cut > 0 {
+		// Find start of the line ending at cut.
+		lineEnd := cut
+		lineStart := lineEnd
+		for lineStart > 0 && data[lineStart-1] != '\n' {
+			lineStart--
+		}
+		line := bytes.TrimSpace(data[lineStart:lineEnd])
+
+		if len(line) == 0 {
+			// Blank line; allow it between tag lines.
+			if lineStart == 0 {
+				break
+			}
+			cut = lineStart - 1
+			continue
+		}
+
+		if lineTags, ok := parseHashtagLine(line); ok {
+			tags = append(lineTags, tags...)
+			sawTagLine = true
+			if lineStart == 0 {
+				cut = 0
+				break
+			}
+			cut = lineStart - 1
+			continue
+		}
+
+		// Optional --- rule above the tag block; consume it then stop.
+		if bytes.Equal(line, []byte("---")) && sawTagLine {
+			cut = lineStart
+			break
+		}
+		break
+	}
+
+	if !sawTagLine {
+		return nil, nil, false
+	}
+
+	// Trim trailing whitespace from the kept body.
+	body := data[:cut]
+	bodyEnd := len(body)
+	for bodyEnd > 0 && (body[bodyEnd-1] == '\n' || body[bodyEnd-1] == '\r' || body[bodyEnd-1] == ' ' || body[bodyEnd-1] == '\t') {
+		bodyEnd--
+	}
+	return body[:bodyEnd], tags, true
+}
+
+// parseHashtagLine returns the tags on a line if the line consists *only* of
+// whitespace and #tag tokens. Returns false otherwise.
+func parseHashtagLine(line []byte) ([]string, bool) {
+	var tags []string
+	i := 0
+	for i < len(line) {
+		// Skip whitespace.
+		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+			i++
+		}
+		if i >= len(line) {
+			break
+		}
+		if line[i] != '#' {
+			return nil, false
+		}
+		j := i + 1
+		if j >= len(line) {
+			return nil, false
+		}
+		c := line[j]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+			return nil, false
+		}
+		k := j + 1
+		for k < len(line) {
+			b := line[k]
+			if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') ||
+				b == '_' || b == '-' || b == '.' || b == '/' {
+				k++
+				continue
+			}
+			break
+		}
+		tags = append(tags, string(line[j:k]))
+		i = k
+	}
+	if len(tags) == 0 {
+		return nil, false
+	}
+	return tags, true
+}
+
+// findYAMLClose locates a "---" line at start-of-line at or after pos.
+// Returns the byte offset where "---" begins and the offset just past its newline.
+func findYAMLClose(data []byte, pos int) (closeStart, closeEnd int, ok bool) {
+	lineStart := pos
+	for lineStart < len(data) {
+		// Find end of current line
+		lineEnd := lineStart
+		for lineEnd < len(data) && data[lineEnd] != '\n' {
+			lineEnd++
+		}
+		line := bytes.TrimRight(data[lineStart:lineEnd], " \t\r")
+		if bytes.Equal(line, []byte("---")) {
+			next := lineEnd
+			if next < len(data) && data[next] == '\n' {
+				next++
+			}
+			return lineStart, next, true
+		}
+		if lineEnd >= len(data) {
+			return 0, 0, false
+		}
+		lineStart = lineEnd + 1
+	}
+	return 0, 0, false
+}
+
+// parseYAMLTags reads tags from a YAML block. Supports:
+//
+//	tags: [a, b, c]
+//	tags: a, b, c
+//	tags:
+//	  - a
+//	  - b
+func parseYAMLTags(data []byte) []string {
+	var tags []string
+	lines := bytes.Split(data, []byte("\n"))
+	inList := false
+	for _, raw := range lines {
+		line := string(bytes.TrimRight(raw, " \t\r"))
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		if inList {
+			if strings.HasPrefix(trimmed, "- ") || trimmed == "-" {
+				item := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+				item = strings.Trim(item, "\"'")
+				if item != "" {
+					tags = append(tags, item)
+				}
+				continue
+			}
+			// Non list-item line ends the list mode unless it's another key
+			inList = false
+		}
+
+		lower := strings.ToLower(trimmed)
+		if !strings.HasPrefix(lower, "tags:") {
+			continue
+		}
+		rest := strings.TrimSpace(trimmed[len("tags:"):])
+
+		if rest == "" {
+			inList = true
+			continue
+		}
+
+		// Inline forms: "[a, b]" or "a, b"
+		rest = strings.TrimPrefix(rest, "[")
+		rest = strings.TrimSuffix(rest, "]")
+		for _, part := range strings.Split(rest, ",") {
+			item := strings.Trim(strings.TrimSpace(part), "\"'")
+			if item != "" {
+				tags = append(tags, item)
+			}
+		}
+	}
+	return tags
+}
+
+// scanInlineTags appends inline #tag tokens found in a prose line to dst.
+// A tag is "#" followed by an ASCII letter, then word chars and -./.
+// Excludes hex colors and numeric-only tokens. Stops at heading lines.
+func scanInlineTags(line []byte, dst *[]string) {
+	if len(line) == 0 {
+		return
+	}
+	// Skip heading lines (start with # space)
+	if line[0] == '#' {
+		// Real markdown heading: "# foo" with whitespace after some #s.
+		i := 0
+		for i < len(line) && line[i] == '#' {
+			i++
+		}
+		if i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+			return
+		}
+	}
+
+	for i := 0; i < len(line); i++ {
+		if line[i] != '#' {
+			continue
+		}
+		// Must be at start of token (preceded by space/start/punct)
+		if i > 0 {
+			prev := line[i-1]
+			if prev != ' ' && prev != '\t' && prev != '(' && prev != '[' && prev != ',' {
+				continue
+			}
+		}
+		// Next char must be ASCII letter (rules out hex colors, #1, #@, etc.)
+		j := i + 1
+		if j >= len(line) {
+			return
+		}
+		c := line[j]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+			continue
+		}
+		// Consume tag body: word chars plus - . /
+		k := j + 1
+		for k < len(line) {
+			b := line[k]
+			if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') ||
+				b == '_' || b == '-' || b == '.' || b == '/' {
+				k++
+				continue
+			}
+			break
+		}
+		*dst = append(*dst, string(line[j:k]))
+		i = k - 1
+	}
 }
 
 // ============================================================================
