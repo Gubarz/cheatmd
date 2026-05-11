@@ -95,6 +95,11 @@ func (item *cheatItem) containsWord(word string) bool {
 	if containsIgnoreCase(item.cheat.Command, word) {
 		return true
 	}
+	for _, tag := range item.cheat.Tags {
+		if containsIgnoreCase(tag, word) {
+			return true
+		}
+	}
 	return false
 }
 

@@ -152,6 +152,34 @@ a `<!-- cheat -->` block are comments.
 Full reference: [docs/dsl.md](docs/dsl.md). Patterns and copy-pasteable
 examples: [docs/recipes.md](docs/recipes.md).
 
+## Tags
+
+Cheats are searchable by tag. Tags can come from five places: the folder/file
+path, YAML front matter, a hashtag or YAML block at the end of the file, an
+inline `#tag` in prose under a cheat, or the heading itself.
+
+```markdown
+---
+tags: [aws, cloud]
+---
+
+# AWS
+
+## list buckets
+
+#s3
+
+\`\`\`sh title:"List S3 buckets"
+aws s3 ls
+\`\`\`
+
+---
+#quickref #production
+```
+
+Tags are merged, lowercased, and folded into the regular search index; type any
+of them in the picker. Full details: [docs/tags.md](docs/tags.md).
+
 ## License
 
 MIT
