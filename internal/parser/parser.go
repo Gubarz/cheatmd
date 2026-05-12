@@ -59,8 +59,9 @@ func collectMarkdownFiles(dir string) ([]string, error) {
 
 // parseResult holds the output from parsing a batch of files
 type parseResult struct {
-	cheats  []*Cheat
-	modules map[string]*Module
+	cheats     []*Cheat
+	modules    map[string]*Module
+	duplicates []DuplicateExport
 }
 
 // parseFilesParallel reads and parses files using a two-stage pipeline
@@ -111,16 +112,24 @@ func parseFilesParallel(files []string) []parseResult {
 			localParser := NewParser()
 			localCheats := make([]*Cheat, 0, estimatedCheats/numWorkers)
 			localModules := make(map[string]*Module)
+			var localDuplicates []DuplicateExport
 
 			for fd := range fileDataChan {
 				localParser.index = NewCheatIndex()
 				localParser.parseLines(fd.path, fd.data)
 				localCheats = append(localCheats, localParser.index.Cheats...)
 				for name, mod := range localParser.index.Modules {
+					if existing, ok := localModules[name]; ok {
+						localDuplicates = append(localDuplicates, DuplicateExport{
+							Name:  name,
+							File1: existing.File,
+							File2: mod.File,
+						})
+					}
 					localModules[name] = mod
 				}
 			}
-			resultChan <- parseResult{cheats: localCheats, modules: localModules}
+			resultChan <- parseResult{cheats: localCheats, modules: localModules, duplicates: localDuplicates}
 		}()
 	}
 
@@ -141,6 +150,8 @@ func (p *Parser) mergeResults(results []parseResult) {
 	var totalCheats []*Cheat
 	for _, r := range results {
 		totalCheats = append(totalCheats, r.cheats...)
+		// Carry forward any duplicates detected within a single worker
+		p.index.Duplicates = append(p.index.Duplicates, r.duplicates...)
 		for name, mod := range r.modules {
 			if p.index.Modules == nil {
 				p.index.Modules = make(map[string]*Module)
