@@ -17,13 +17,33 @@ import (
 // ============================================================================
 
 // Run launches the Bubble Tea TUI interface
-func Run(index *parser.CheatIndex, exec *executor.Executor, initialQuery, matchCmd string) error {
+func Run(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string) error {
 	return RunTUI(index, exec, initialQuery, matchCmd)
 }
 
 // ============================================================================
 // Variable Resolution
 // ============================================================================
+
+// SelectOptions holds display options for selection
+type SelectOptions struct {
+	Delimiter    string
+	Column       int    // 1-indexed, 0 = all (display column)
+	SelectColumn int    // 1-indexed, 0 = no extraction (return full/original line)
+	MapCmd       string // command to transform selected value
+}
+
+// getDisplayColumn extracts the display column from a line
+func getDisplayColumn(line, delimiter string, column int) string {
+	if delimiter == "" || column == 0 {
+		return line
+	}
+	parts := strings.Split(line, delimiter)
+	if column > 0 && column <= len(parts) {
+		return strings.TrimSpace(parts[column-1])
+	}
+	return line
+}
 
 // varState tracks a variable and its resolved value
 type varState struct {
@@ -247,7 +267,7 @@ func extractCustomHeader(selectorArgs string) string {
 // ============================================================================
 
 // executeOutput handles the final command based on output mode
-func executeOutput(command string, exec *executor.Executor) error {
+func executeOutput(command string, exec Executor) error {
 	// Apply hooks
 	finalCmd := command
 	if preHook := config.GetPreHook(); preHook != "" {

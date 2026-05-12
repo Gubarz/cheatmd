@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var version = "0.1.7"
+var version = "0.1.8"
 
 var widgetCmd = &cobra.Command{
 	Use:   "widget [shell]",
@@ -232,6 +232,7 @@ func runCheats(cmd *cobra.Command, args []string) error {
 
 	// Parse markdown files
 	benchmark, _ := cmd.Flags().GetBool("benchmark")
+
 	start := time.Now()
 
 	p := parser.NewParser()
