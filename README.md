@@ -85,6 +85,27 @@ Variables are populated from shell command output:
 - **1 line** → pre-filled, confirm with Enter
 - **2+ lines** → selection list
 
+By default only `$name` is recognized as a variable reference and undeclared
+references are silently skipped. Two opt-in config flags relax that:
+
+- `allow_angle_vars: true`: also recognize `<name>` (the older convention).
+  Mixing `$name` and `<name>` in one command resolves to the same variable.
+- `allow_undeclared_vars: true`: prompt for any referenced variable that
+  has no `<!-- cheat -->` declaration, instead of skipping it.
+
+With both flags on, this cheat works with no metadata block:
+
+```markdown
+## SSH
+
+` ` `sh title:"SSH to a host"
+ssh $user@<host> -p $port
+` ` `
+```
+
+The user is prompted for `user`, `host`, and `port` in order. Defaults are
+`false` for both flags, matching strict-by-default behavior.
+
 ### Modules
 
 Export reusable variables:

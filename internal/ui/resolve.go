@@ -38,13 +38,26 @@ type varState struct {
 // collectVariables gathers all variable definitions from imports and local
 // Also detects variable dependencies (vars referenced in other vars' shell commands)
 // Supports conditional var definitions (if/fi blocks) - stores all variants per name
+//
+// When config.GetAllowUndeclaredVars() is true, variables referenced in the
+// command but not declared anywhere get a prompt-only definition synthesized
+// so the user is asked for a value at runtime. When false (default), such
+// variables are silently skipped.
 func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState {
 	varDefs := collectVarDefinitions(cheat, index)
 	usedVars := findAllVars(cheat.Command)
+
+	if config.GetAllowUndeclaredVars() {
+		for _, name := range usedVars {
+			if _, ok := varDefs[name]; !ok {
+				varDefs[name] = []parser.VarDef{{Name: name}}
+			}
+		}
+	}
+
 	allNeeded := findAllDependencies(usedVars, varDefs)
 	orderedVars := topologicalSort(usedVars, varDefs, allNeeded)
 
-	// Build final list - only include vars that have definitions
 	var vars []varState
 	for _, varName := range orderedVars {
 		if defs, ok := varDefs[varName]; ok && len(defs) > 0 {
@@ -203,9 +216,15 @@ func evaluateCondition(condition string, scope map[string]string) bool {
 	return condition != ""
 }
 
-// replaceVar replaces $varname in cmd with replacement
+// replaceVar replaces `$varname` references in cmd with replacement.
+// Also replaces `<varname>` when the allow_angle_vars config flag is set.
 func replaceVar(cmd, varName, replacement string) string {
-	re := regexp.MustCompile(`\$` + regexp.QuoteMeta(varName) + `\b`)
+	q := regexp.QuoteMeta(varName)
+	pattern := `\$` + q + `\b`
+	if config.GetAllowAngleVars() {
+		pattern += `|<` + q + `>`
+	}
+	re := regexp.MustCompile(pattern)
 	return re.ReplaceAllLiteralString(cmd, replacement)
 }
 
@@ -258,34 +277,64 @@ func executeOutput(command string, exec *executor.Executor) error {
 // String Utilities
 // ============================================================================
 
-// findAllVars finds ALL $varname patterns in a command, ignoring quoting.
-// Used for collecting all variables that might need resolution.
+// findAllVars finds ALL variable references in a command, ignoring quoting.
+// Always recognizes `$name`. Also recognizes `<name>` when the
+// allow_angle_vars config flag is set. `<name|default>` is never auto-resolved
+// (use a `<!-- cheat -->` block to declare defaults).
 func findAllVars(cmd string) []string {
+	allowAngle := config.GetAllowAngleVars()
+
 	var vars []string
 	seen := make(map[string]bool)
+	add := func(name string) {
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		vars = append(vars, name)
+	}
 
 	for i := 0; i < len(cmd); i++ {
-		if cmd[i] != '$' || i+1 >= len(cmd) {
-			continue
-		}
-		// Skip escaped $
-		if i > 0 && cmd[i-1] == '\\' {
-			continue
-		}
-
-		j := i + 1
-		for j < len(cmd) && isVarChar(cmd[j], j == i+1) {
-			j++
-		}
-
-		if j > i+1 {
-			varName := cmd[i+1 : j]
-			if !seen[varName] {
-				vars = append(vars, varName)
-				seen[varName] = true
+		switch cmd[i] {
+		case '$':
+			if i+1 >= len(cmd) {
+				continue
 			}
+			// Skip escaped $
+			if i > 0 && cmd[i-1] == '\\' {
+				continue
+			}
+			j := i + 1
+			for j < len(cmd) && isVarChar(cmd[j], j == i+1) {
+				j++
+			}
+			if j > i+1 {
+				add(cmd[i+1 : j])
+			}
+			i = j - 1
+		case '<':
+			if !allowAngle {
+				continue
+			}
+			j := i + 1
+			if j >= len(cmd) {
+				continue
+			}
+			if !isVarChar(cmd[j], true) {
+				continue
+			}
+			j++
+			for j < len(cmd) && isVarChar(cmd[j], false) {
+				j++
+			}
+			// Must close with '>' to be a variable reference; skip
+			// `<name|default>` (default-bearing form is not auto-resolved).
+			if j >= len(cmd) || cmd[j] != '>' {
+				continue
+			}
+			add(cmd[i+1 : j])
+			i = j
 		}
-		i = j - 1
 	}
 
 	return vars

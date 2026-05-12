@@ -14,6 +14,28 @@ next line `--- --header "Pick one"`.
 
 ---
 
+## Referencing variables in commands
+
+Commands always recognize `$name` as a variable reference. Two opt-in config
+flags expand what's supported:
+
+- `allow_angle_vars: true`: also recognize `<name>` (the older convention).
+  Both forms resolve to the same variable and can be mixed in one command.
+- `allow_undeclared_vars: true`: prompt for any referenced variable that
+  isn't declared in a `<!-- cheat -->` block, instead of silently skipping
+  it.
+
+With both flags on, this command needs no metadata block:
+
+```sh title:"SSH"
+ssh $user@<host> -p $port
+```
+
+`<name|default>` is *not* auto-resolved; use a `var name = echo "default"`
+declaration if you need an editable default.
+
+---
+
 ## Variables
 
 ### Prompt-only
