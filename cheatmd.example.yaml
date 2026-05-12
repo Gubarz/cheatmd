@@ -56,9 +56,11 @@ require_cheat_block: false
 # skipped.
 allow_undeclared_vars: false
 
-# Recognize <name> as a variable reference in addition to $name. When false
-# (default), <name> is treated as plain text.
-allow_angle_vars: false
+# Variable syntax accepted in cheat commands.
+#   dollar (default) - only $name is a variable reference
+#   angle            - only <name> is a variable reference
+#   both             - accept both, resolving to the same variable
+var_syntax: dollar
 
 # Auto-continue when variables are prefilled from environment
 # When true, if a var is already set (e.g., export domain=example.com),

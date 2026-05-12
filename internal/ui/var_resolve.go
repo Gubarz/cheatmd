@@ -138,7 +138,7 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 
 	// Literal value: substitute scope vars and either show or auto-resolve.
 	if vs.def.Literal != "" {
-		result := executor.SubstituteVars(vs.def.Literal, scope, "both")
+		result := executor.SubstituteVars(vs.def.Literal, scope, "dollar")
 		if vs.skipAutoCont {
 			m.varState.isPromptOnly = true
 			m.varState.options = nil
@@ -166,7 +166,7 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 	}
 
 	// Run shell command asynchronously to get options.
-	shellCmd := executor.SubstituteVars(vs.def.Shell, scope, "both")
+	shellCmd := executor.SubstituteVars(vs.def.Shell, scope, "dollar")
 	return func() tea.Msg {
 		output, err := m.executor.RunShell(shellCmd)
 		if err != nil {
@@ -533,25 +533,27 @@ func (m *mainModel) renderVarHeader(width int) string {
 	progressCmd := m.varState.cheat.Command
 	for i, vs := range m.varState.vars {
 		if vs.resolved {
-			progressCmd = replaceVar(progressCmd, vs.def.Name, styles.Header.Render(vs.value))
+			progressCmd = replaceVar(progressCmd, vs.def.Name, styles.Header.Render(vs.value), config.GetVarSyntax())
 		} else if i == m.varState.currentIdx {
-			progressCmd = replaceVar(progressCmd, vs.def.Name, styles.Cursor.Render("$"+vs.def.Name))
+			displayStr := formatVarName(m.varState.cheat.Command, vs.def.Name)
+			progressCmd = replaceVar(progressCmd, vs.def.Name, styles.Cursor.Render(displayStr), config.GetVarSyntax())
 		}
 	}
 	b.WriteString(progressCmd)
 	b.WriteString("\n")
 
 	for i, vs := range m.varState.vars {
+		displayStr := formatVarName(m.varState.cheat.Command, vs.def.Name)
 		if vs.resolved {
 			b.WriteString(styles.Command.Render("✓"))
 			b.WriteString(" ")
-			b.WriteString(styles.Dim.Render("$" + vs.def.Name))
+			b.WriteString(styles.Dim.Render(displayStr))
 			b.WriteString(" = ")
 			b.WriteString(styles.Header.Render(vs.value))
 		} else if i == m.varState.currentIdx {
-			b.WriteString(styles.Cursor.Render("▶ $" + vs.def.Name))
+			b.WriteString(styles.Cursor.Render("▶ " + displayStr))
 		} else {
-			b.WriteString(styles.Dim.Render("○ $" + vs.def.Name))
+			b.WriteString(styles.Dim.Render("○ " + displayStr))
 		}
 		b.WriteString("\n")
 	}
@@ -566,4 +568,17 @@ func (m *mainModel) renderVarHeader(width int) string {
 	b.WriteString("\n")
 
 	return b.String()
+}
+
+// formatVarName returns the variable name formatted according to how it appears in the command,
+// or defaults based on the syntax config.
+func formatVarName(cmd string, name string) string {
+	if config.GetVarSyntax() == "angle" {
+		return "<" + name + ">"
+	} else if config.GetVarSyntax() == "both" {
+		if strings.Contains(cmd, "<"+name+">") {
+			return "<" + name + ">"
+		}
+	}
+	return "$" + name
 }
