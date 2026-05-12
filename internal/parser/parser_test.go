@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -261,5 +263,50 @@ func TestParseVarDefLiteral(t *testing.T) {
 	v := ParseVarDefLiteral("greeting", "hello world --- A greeting")
 	if v.Name != "greeting" || v.Literal != "hello world" || v.Args != "A greeting" {
 		t.Errorf("ParseVarDefLiteral() = {Name:%q Literal:%q Args:%q}", v.Name, v.Literal, v.Args)
+	}
+}
+
+// TestDuplicateExportDetection verifies that duplicate exports are always
+// detected regardless of which goroutine processes each file. This is a
+// regression test for a race condition where two files with the same export
+// landing on the same worker goroutine would silently overwrite instead of
+// recording a duplicate.
+func TestDuplicateExportDetection(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cheats")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fileA := filepath.Join(dir, "a.md")
+	fileB := filepath.Join(dir, "b.md")
+
+	contentA := "# Module A\n\n```bash\necho from-a\n```\n\n<!-- cheat\nexport mymod\nvar host = echo localhost\n-->\n"
+	contentB := "# Module B\n\n```bash\necho from-b\n```\n\n<!-- cheat\nexport mymod\nvar host = echo remotehost\n-->\n"
+	if err := os.WriteFile(fileA, []byte(contentA), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fileB, []byte(contentB), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run multiple times to exercise different goroutine scheduling paths.
+	// Before the fix, this would fail intermittently when both files landed
+	// on the same worker.
+	for i := 0; i < 20; i++ {
+		p := NewParser()
+		index, err := p.ParseDirectory(dir)
+		if err != nil {
+			t.Fatalf("run %d: ParseDirectory() error: %v", i, err)
+		}
+
+		if len(index.Duplicates) != 1 {
+			t.Errorf("run %d: expected 1 duplicate, got %d", i, len(index.Duplicates))
+			continue
+		}
+
+		dup := index.Duplicates[0]
+		if dup.Name != "mymod" {
+			t.Errorf("run %d: duplicate name = %q, want \"mymod\"", i, dup.Name)
+		}
 	}
 }
