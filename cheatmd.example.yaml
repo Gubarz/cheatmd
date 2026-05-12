@@ -51,6 +51,15 @@ column_gap: 4
 # Only show cheats that have a <!-- cheat --> block
 require_cheat_block: false
 
+# Prompt for $var references in a command even when there's no matching
+# <!-- cheat --> declaration. When false, undeclared variables are silently
+# skipped.
+allow_undeclared_vars: false
+
+# Recognize <name> as a variable reference in addition to $name. When false
+# (default), <name> is treated as plain text.
+allow_angle_vars: false
+
 # Auto-continue when variables are prefilled from environment
 # When true, if a var is already set (e.g., export domain=example.com),
 # it will be used without prompting. Press ESC to go back and edit.

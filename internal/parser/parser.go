@@ -202,26 +202,12 @@ var patterns = struct {
 	cheatStart      *regexp.Regexp
 	cheatEnd        *regexp.Regexp
 	cheatSingleLine *regexp.Regexp
-	export          *regexp.Regexp
-	importStmt      *regexp.Regexp
-	varDef          *regexp.Regexp
-	varDefLiteral   *regexp.Regexp
-	varDefPrompt    *regexp.Regexp
-	ifStart         *regexp.Regexp
-	ifEnd           *regexp.Regexp
 }{
 	header:          regexp.MustCompile(`^(#{1,6})\s+(.+)$`),
 	codeBlockStart:  regexp.MustCompile("^```(\\w*)(?:\\s+title:\"([^\"]*)\")?\\s*$"),
 	cheatStart:      regexp.MustCompile(`(?i)^<!--\s*cheat\s*$`),
 	cheatEnd:        regexp.MustCompile(`(?i)^-->\s*$`),
 	cheatSingleLine: regexp.MustCompile(`(?i)^<!--\s*cheat\s*(.*?)\s*-->$`),
-	export:          regexp.MustCompile(`^export\s+(\S+)$`),
-	importStmt:      regexp.MustCompile(`^import\s+(\S+)$`),
-	varDef:          regexp.MustCompile(`^var\s+(\w+)\s*=\s*(.+)$`),
-	varDefLiteral:   regexp.MustCompile(`^var\s+(\w+)\s*:=\s*(.+)$`),
-	varDefPrompt:    regexp.MustCompile(`^var\s+(\w+)\s*$`),
-	ifStart:         regexp.MustCompile(`^if\s+(.+)$`),
-	ifEnd:           regexp.MustCompile(`^fi$`),
 }
 
 // IsShellLanguage returns true if the language is a shell language
@@ -789,45 +775,43 @@ func (p *Parser) createCheat(path string, s *parseState, description, command, c
 // tag, file-level tags (front matter + footer), and per-cheat inline #tags.
 // Result is lowercased and deduplicated.
 //
-// Fast paths avoid allocation when there are no extra tag sources or when
-// extras are guaranteed not to duplicate path tags.
+// Fast path: when there are no extra tag sources we return the cached path
+// tags directly (zero allocation). Otherwise we dedupe with a linear scan
+// over the accumulator; tag counts per cheat are tiny, so linear beats a
+// map and avoids closure allocation.
 func (p *Parser) buildCheatTags(path string, s *parseState) []string {
 	pathTags := p.getTagsForPath(path, s.currentHeader)
 
-	extra := len(s.fileTags) + len(s.currentHeaderTags)
-	if extra == 0 {
+	if len(s.fileTags) == 0 && len(s.currentHeaderTags) == 0 {
 		return pathTags
 	}
 
+	extra := len(s.fileTags) + len(s.currentHeaderTags)
 	out := make([]string, len(pathTags), len(pathTags)+extra)
 	copy(out, pathTags)
 
-	var seen map[string]struct{}
-	appendUnique := func(tag string) {
-		tag = strings.ToLower(strings.TrimSpace(tag))
-		if tag == "" {
-			return
+	out = appendUniqueTags(out, s.fileTags)
+	out = appendUniqueTags(out, s.currentHeaderTags)
+	return out
+}
+
+// appendUniqueTags appends every entry in src to dst, lowercased and trimmed,
+// skipping duplicates already in dst. Linear scan; suitable for small tag sets.
+func appendUniqueTags(dst []string, src []string) []string {
+outer:
+	for _, t := range src {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" {
+			continue
 		}
-		if seen == nil {
-			seen = make(map[string]struct{}, len(pathTags)+extra)
-			for _, t := range pathTags {
-				seen[t] = struct{}{}
+		for _, existing := range dst {
+			if existing == t {
+				continue outer
 			}
 		}
-		if _, ok := seen[tag]; ok {
-			return
-		}
-		seen[tag] = struct{}{}
-		out = append(out, tag)
+		dst = append(dst, t)
 	}
-
-	for _, t := range s.fileTags {
-		appendUnique(t)
-	}
-	for _, t := range s.currentHeaderTags {
-		appendUnique(t)
-	}
-	return out
+	return dst
 }
 
 // getTagsForPath returns cached path tags plus header tag
@@ -855,61 +839,125 @@ func (p *Parser) getTagsForPath(path, header string) []string {
 	return pathTags
 }
 
-// parseCheatDSL parses the DSL content within a cheat block
+// parseCheatDSL parses the DSL content within a cheat block.
+//
+// Hand-rolled dispatch on the first keyword (var / if / fi / export / import)
+// avoids the per-line regex matching that dominated CPU previously. Each
+// non-comment, non-blank line is matched against at most one branch.
 func parseCheatDSL(cheat *Cheat, content string) {
-	// First, join lines that end with backslash (line continuation)
 	lines := joinContinuationLines(strings.Split(content, "\n"))
 
-	// Track current condition for if/fi blocks
 	var currentCondition string
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" || line[0] == '#' {
 			continue
 		}
 
-		// Handle if/fi blocks
-		if matches := patterns.ifStart.FindStringSubmatch(line); matches != nil {
-			currentCondition = strings.TrimSpace(matches[1])
-			continue
-		}
-
-		if patterns.ifEnd.MatchString(line) {
-			currentCondition = ""
-			continue
-		}
-
-		if matches := patterns.export.FindStringSubmatch(line); matches != nil {
-			cheat.Export = matches[1]
-			continue
-		}
-
-		if matches := patterns.importStmt.FindStringSubmatch(line); matches != nil {
-			cheat.Imports = append(cheat.Imports, matches[1])
-			continue
-		}
-
-		// Check for literal assignment first (:=) before shell assignment (=)
-		if matches := patterns.varDefLiteral.FindStringSubmatch(line); matches != nil {
-			cheat.Vars = append(cheat.Vars, ParseVarDefWithCondition(matches[1], matches[2], currentCondition, true))
-			continue
-		}
-
-		if matches := patterns.varDef.FindStringSubmatch(line); matches != nil {
-			cheat.Vars = append(cheat.Vars, ParseVarDefWithCondition(matches[1], matches[2], currentCondition, false))
-			continue
-		}
-
-		// Check for prompt-only var (no assignment)
-		if matches := patterns.varDefPrompt.FindStringSubmatch(line); matches != nil {
-			cheat.Vars = append(cheat.Vars, VarDef{
-				Name:      matches[1],
-				Condition: currentCondition,
-				// Shell and Literal both empty = prompt-only
-			})
+		keyword, rest := splitFirstWord(line)
+		switch keyword {
+		case "fi":
+			if rest == "" {
+				currentCondition = ""
+			}
+		case "if":
+			if rest != "" {
+				currentCondition = rest
+			}
+		case "export":
+			if rest != "" && !containsWhitespace(rest) {
+				cheat.Export = rest
+			}
+		case "import":
+			if rest != "" && !containsWhitespace(rest) {
+				cheat.Imports = append(cheat.Imports, rest)
+			}
+		case "var":
+			parseVarLine(cheat, rest, currentCondition)
 		}
 	}
+}
+
+// parseVarLine handles the three var declaration forms:
+//
+//	var NAME           -> prompt-only
+//	var NAME := value  -> literal
+//	var NAME = value   -> shell
+func parseVarLine(cheat *Cheat, rest, condition string) {
+	name, after := splitFirstWord(rest)
+	if name == "" || !isValidDSLVarName(name) {
+		return
+	}
+
+	if after == "" {
+		cheat.Vars = append(cheat.Vars, VarDef{
+			Name:      name,
+			Condition: condition,
+		})
+		return
+	}
+
+	// Detect ":=" vs "=" assignment operator.
+	switch {
+	case strings.HasPrefix(after, ":="):
+		value := strings.TrimSpace(after[2:])
+		if value == "" {
+			return
+		}
+		cheat.Vars = append(cheat.Vars, ParseVarDefWithCondition(name, value, condition, true))
+	case after[0] == '=':
+		value := strings.TrimSpace(after[1:])
+		if value == "" {
+			return
+		}
+		cheat.Vars = append(cheat.Vars, ParseVarDefWithCondition(name, value, condition, false))
+	}
+}
+
+// splitFirstWord returns the leading whitespace-delimited token and the
+// remainder with leading whitespace trimmed. If the input has no token, the
+// keyword is "".
+func splitFirstWord(s string) (keyword, rest string) {
+	i := 0
+	for i < len(s) && s[i] != ' ' && s[i] != '\t' {
+		i++
+	}
+	if i == 0 {
+		return "", ""
+	}
+	keyword = s[:i]
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	rest = s[i:]
+	return
+}
+
+// isValidDSLVarName reports whether s matches `\w+` (the regex previously
+// used for var names): letters, digits, underscores; first char unrestricted
+// to mirror the prior behavior (regexp `\w` allows leading digit).
+func isValidDSLVarName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// containsWhitespace reports whether s has any space or tab.
+func containsWhitespace(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ' ' || s[i] == '\t' {
+			return true
+		}
+	}
+	return false
 }
 
 // joinContinuationLines joins lines that end with backslash

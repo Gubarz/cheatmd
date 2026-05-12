@@ -228,7 +228,7 @@ func isValidVarName(s string) bool {
 }
 
 // splitShellTokens splits a command line into whitespace-separated tokens,
-// keeping quoted regions intact. It's not a full shell parser — just enough
+// keeping quoted regions intact. It's not a full shell parser, just enough
 // to handle the common cases in history.
 func splitShellTokens(line string) []string {
 	var tokens []string

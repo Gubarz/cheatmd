@@ -20,9 +20,11 @@ type Config struct {
 	Editor            string `mapstructure:"editor"`
 	PreHook           string `mapstructure:"pre_hook"`
 	PostHook          string `mapstructure:"post_hook"`
-	RequireCheatBlock bool   `mapstructure:"require_cheat_block"`
-	AutoSelect        bool   `mapstructure:"auto_select"`
-	AutoContinue      bool   `mapstructure:"auto_continue"`
+	RequireCheatBlock   bool `mapstructure:"require_cheat_block"`
+	AllowUndeclaredVars bool `mapstructure:"allow_undeclared_vars"`
+	AllowAngleVars      bool `mapstructure:"allow_angle_vars"`
+	AutoSelect          bool `mapstructure:"auto_select"`
+	AutoContinue        bool `mapstructure:"auto_continue"`
 
 	// Keybindings
 	KeyWidget     string `mapstructure:"key_widget"`
@@ -74,11 +76,13 @@ var defaults = struct {
 	output            string
 	shell             string
 	editor            string
-	preHook           string
-	postHook          string
-	requireCheatBlock bool
-	autoSelect        bool
-	autoContinue      bool
+	preHook             string
+	postHook            string
+	requireCheatBlock   bool
+	allowUndeclaredVars bool
+	allowAngleVars      bool
+	autoSelect          bool
+	autoContinue        bool
 	keyWidget         string
 	keyOpen           string
 	keySubstitute     string
@@ -95,9 +99,11 @@ var defaults = struct {
 	editor:            "", // Empty means use system default (xdg-open/open/start)
 	preHook:           "",
 	postHook:          "",
-	requireCheatBlock: false,
-	autoSelect:        false,
-	autoContinue:      false,
+	requireCheatBlock:   false,
+	allowUndeclaredVars: false,
+	allowAngleVars:      false,
+	autoSelect:          false,
+	autoContinue:        false,
 	keyWidget:         "\\C-g",            // Ctrl+G for shell widgets
 	keyOpen:           "ctrl+o",           // Ctrl+O in TUI
 	keySubstitute:     "ctrl+t",           // Ctrl+T opens substitute search during var resolution
@@ -158,6 +164,8 @@ func setDefaults() {
 	viper.SetDefault("pre_hook", defaults.preHook)
 	viper.SetDefault("post_hook", defaults.postHook)
 	viper.SetDefault("require_cheat_block", defaults.requireCheatBlock)
+	viper.SetDefault("allow_undeclared_vars", defaults.allowUndeclaredVars)
+	viper.SetDefault("allow_angle_vars", defaults.allowAngleVars)
 	viper.SetDefault("auto_select", defaults.autoSelect)
 	viper.SetDefault("auto_continue", defaults.autoContinue)
 
@@ -238,6 +246,26 @@ func GetPostHook() string {
 // GetEditor returns the configured editor command (empty = system default)
 func GetEditor() string {
 	return viper.GetString("editor")
+}
+
+// GetAllowUndeclaredVars returns whether variables referenced in a cheat's
+// command but not declared in any <!-- cheat --> block should be prompted at
+// runtime. When false (default), undeclared variables are silently skipped.
+//
+// Reads from the cached struct populated at Init() because this getter is
+// called in hot paths (per-variable, per-render).
+func GetAllowUndeclaredVars() bool {
+	return cfg.AllowUndeclaredVars
+}
+
+// GetAllowAngleVars returns whether <name> in a cheat's command is recognized
+// as a variable reference (in addition to the always-supported $name). When
+// false (default), <name> is treated as plain text.
+//
+// Reads from the cached struct populated at Init() because this getter is
+// called in hot paths (per-variable, per-render).
+func GetAllowAngleVars() bool {
+	return cfg.AllowAngleVars
 }
 
 // GetRequireCheatBlock returns whether to require cheat blocks
