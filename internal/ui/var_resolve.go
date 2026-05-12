@@ -138,7 +138,7 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 
 	// Literal value: substitute scope vars and either show or auto-resolve.
 	if vs.def.Literal != "" {
-		result := executor.SubstituteVars(vs.def.Literal, scope)
+		result := executor.SubstituteVars(vs.def.Literal, scope, "both")
 		if vs.skipAutoCont {
 			m.varState.isPromptOnly = true
 			m.varState.options = nil
@@ -166,7 +166,7 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 	}
 
 	// Run shell command asynchronously to get options.
-	shellCmd := executor.SubstituteVars(vs.def.Shell, scope)
+	shellCmd := executor.SubstituteVars(vs.def.Shell, scope, "both")
 	return func() tea.Msg {
 		output, err := m.executor.RunShell(shellCmd)
 		if err != nil {

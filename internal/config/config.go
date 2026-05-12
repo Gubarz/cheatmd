@@ -21,8 +21,8 @@ type Config struct {
 	PreHook           string `mapstructure:"pre_hook"`
 	PostHook          string `mapstructure:"post_hook"`
 	RequireCheatBlock   bool `mapstructure:"require_cheat_block"`
-	AllowUndeclaredVars bool `mapstructure:"allow_undeclared_vars"`
-	AllowAngleVars      bool `mapstructure:"allow_angle_vars"`
+	AllowUndeclaredVars bool   `mapstructure:"allow_undeclared_vars"`
+	VarSyntax           string `mapstructure:"var_syntax"`
 	AutoSelect          bool `mapstructure:"auto_select"`
 	AutoContinue        bool `mapstructure:"auto_continue"`
 
@@ -80,7 +80,7 @@ var defaults = struct {
 	postHook            string
 	requireCheatBlock   bool
 	allowUndeclaredVars bool
-	allowAngleVars      bool
+	varSyntax           string
 	autoSelect          bool
 	autoContinue        bool
 	keyWidget         string
@@ -101,7 +101,7 @@ var defaults = struct {
 	postHook:          "",
 	requireCheatBlock:   false,
 	allowUndeclaredVars: false,
-	allowAngleVars:      false,
+	varSyntax:           "dollar",
 	autoSelect:          false,
 	autoContinue:        false,
 	keyWidget:         "\\C-g",            // Ctrl+G for shell widgets
@@ -165,7 +165,7 @@ func setDefaults() {
 	viper.SetDefault("post_hook", defaults.postHook)
 	viper.SetDefault("require_cheat_block", defaults.requireCheatBlock)
 	viper.SetDefault("allow_undeclared_vars", defaults.allowUndeclaredVars)
-	viper.SetDefault("allow_angle_vars", defaults.allowAngleVars)
+	viper.SetDefault("var_syntax", defaults.varSyntax)
 	viper.SetDefault("auto_select", defaults.autoSelect)
 	viper.SetDefault("auto_continue", defaults.autoContinue)
 
@@ -258,14 +258,31 @@ func GetAllowUndeclaredVars() bool {
 	return cfg.AllowUndeclaredVars
 }
 
-// GetAllowAngleVars returns whether <name> in a cheat's command is recognized
-// as a variable reference (in addition to the always-supported $name). When
-// false (default), <name> is treated as plain text.
+// GetVarSyntax returns the configured variable syntax mode.
+// Valid values: "dollar" (default), "angle", "both".
 //
 // Reads from the cached struct populated at Init() because this getter is
 // called in hot paths (per-variable, per-render).
-func GetAllowAngleVars() bool {
-	return cfg.AllowAngleVars
+func GetVarSyntax() string {
+	v := cfg.VarSyntax
+	switch v {
+	case "dollar", "angle", "both":
+		return v
+	default:
+		return "dollar"
+	}
+}
+
+// VarSyntaxAllowsDollar reports whether $name is recognized as a variable.
+func VarSyntaxAllowsDollar() bool {
+	s := GetVarSyntax()
+	return s == "dollar" || s == "both"
+}
+
+// VarSyntaxAllowsAngle reports whether <name> is recognized as a variable.
+func VarSyntaxAllowsAngle() bool {
+	s := GetVarSyntax()
+	return s == "angle" || s == "both"
 }
 
 // GetRequireCheatBlock returns whether to require cheat blocks

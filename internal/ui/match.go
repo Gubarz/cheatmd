@@ -173,7 +173,7 @@ func inferDependentVars(cheat *parser.Cheat, index *parser.CheatIndex) {
 					continue
 				}
 
-				literalResult := executor.SubstituteVars(def.Literal, cheat.Scope)
+				literalResult := executor.SubstituteVars(def.Literal, cheat.Scope, "both")
 
 				if strings.Contains(literalResult, "$") {
 					extracted := extractEmbeddedVars(def.Literal, prefillValue, cheat.Scope)
@@ -183,7 +183,7 @@ func inferDependentVars(cheat *parser.Cheat, index *parser.CheatIndex) {
 							changed = true
 						}
 					}
-					literalResult = executor.SubstituteVars(def.Literal, cheat.Scope)
+					literalResult = executor.SubstituteVars(def.Literal, cheat.Scope, "both")
 				}
 
 				if literalResult == prefillValue && condOp == "==" {

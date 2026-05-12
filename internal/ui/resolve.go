@@ -211,7 +211,7 @@ func evaluateCondition(condition string, scope map[string]string) bool {
 
 	// Substitute variables in condition (longest names first to prevent
 	// prefix collisions, e.g. $s matching inside $scheme).
-	condition = executor.SubstituteVars(condition, scope)
+	condition = executor.SubstituteVars(condition, scope, "both")
 
 	// Check for comparison operators
 	if strings.Contains(condition, "==") {
@@ -236,14 +236,22 @@ func evaluateCondition(condition string, scope map[string]string) bool {
 	return condition != ""
 }
 
-// replaceVar replaces `$varname` references in cmd with replacement.
-// Also replaces `<varname>` when the allow_angle_vars config flag is set.
+// replaceVar replaces variable references in cmd with replacement.
+// Respects var_syntax config: replaces `$varname` when dollar syntax is
+// enabled, and `<varname>` when angle syntax is enabled.
 func replaceVar(cmd, varName, replacement string) string {
 	q := regexp.QuoteMeta(varName)
-	pattern := `\$` + q + `\b`
-	if config.GetAllowAngleVars() {
-		pattern += `|<` + q + `>`
+	var parts []string
+	if config.VarSyntaxAllowsDollar() {
+		parts = append(parts, `\$`+q+`\b`)
 	}
+	if config.VarSyntaxAllowsAngle() {
+		parts = append(parts, `<`+q+`>`)
+	}
+	if len(parts) == 0 {
+		return cmd
+	}
+	pattern := strings.Join(parts, "|")
 	re := regexp.MustCompile(pattern)
 	return re.ReplaceAllLiteralString(cmd, replacement)
 }
@@ -298,11 +306,13 @@ func executeOutput(command string, exec Executor) error {
 // ============================================================================
 
 // findAllVars finds ALL variable references in a command, ignoring quoting.
-// Always recognizes `$name`. Also recognizes `<name>` when the
-// allow_angle_vars config flag is set. `<name|default>` is never auto-resolved
-// (use a `<!-- cheat -->` block to declare defaults).
+// Respects var_syntax config: recognizes `$name` when dollar syntax is
+// enabled, and `<name>` when angle syntax is enabled.
+// `<name|default>` is never auto-resolved (use a `<!-- cheat -->` block to
+// declare defaults).
 func findAllVars(cmd string) []string {
-	allowAngle := config.GetAllowAngleVars()
+	allowDollar := config.VarSyntaxAllowsDollar()
+	allowAngle := config.VarSyntaxAllowsAngle()
 
 	var vars []string
 	seen := make(map[string]bool)
@@ -317,6 +327,9 @@ func findAllVars(cmd string) []string {
 	for i := 0; i < len(cmd); i++ {
 		switch cmd[i] {
 		case '$':
+			if !allowDollar {
+				continue
+			}
 			if i+1 >= len(cmd) {
 				continue
 			}
