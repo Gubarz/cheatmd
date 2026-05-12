@@ -16,16 +16,20 @@ next line `--- --header "Pick one"`.
 
 ## Referencing variables in commands
 
-Commands always recognize `$name` as a variable reference. Two opt-in config
-flags expand what's supported:
+The `var_syntax` config setting controls which forms cheatmd recognizes as
+variable references in command text:
 
-- `allow_angle_vars: true`: also recognize `<name>` (the older convention).
-  Both forms resolve to the same variable and can be mixed in one command.
-- `allow_undeclared_vars: true`: prompt for any referenced variable that
-  isn't declared in a `<!-- cheat -->` block, instead of silently skipping
-  it.
+- `dollar` (default): only `$name`
+- `angle`: only `<name>`
+- `both`: accept both forms; mixed in one command they resolve to the same
+  variable
 
-With both flags on, this command needs no metadata block:
+The companion flag `allow_undeclared_vars: true` makes cheatmd prompt for any
+referenced variable that isn't declared in a `<!-- cheat -->` block, instead
+of silently skipping it.
+
+With `var_syntax: both` and `allow_undeclared_vars: true`, this command needs
+no metadata block:
 
 ```sh title:"SSH"
 ssh $user@<host> -p $port

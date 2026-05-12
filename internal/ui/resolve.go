@@ -65,7 +65,7 @@ type varState struct {
 // variables are silently skipped.
 func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState {
 	varDefs := collectVarDefinitions(cheat, index)
-	usedVars := findAllVars(cheat.Command)
+	usedVars := findAllVars(cheat.Command, config.GetVarSyntax())
 
 	if config.GetAllowUndeclaredVars() {
 		for _, name := range usedVars {
@@ -122,9 +122,9 @@ func collectVarDefinitions(cheat *parser.Cheat, index *parser.CheatIndex) map[st
 // varDefDependencies returns all variable references in a VarDef
 func varDefDependencies(def parser.VarDef) []string {
 	var deps []string
-	deps = append(deps, findAllVars(def.Shell)...)
-	deps = append(deps, findAllVars(def.Literal)...)
-	deps = append(deps, findAllVars(def.Condition)...)
+	deps = append(deps, findAllVars(def.Shell, "dollar")...)
+	deps = append(deps, findAllVars(def.Literal, "dollar")...)
+	deps = append(deps, findAllVars(def.Condition, "dollar")...)
 	return deps
 }
 
@@ -211,7 +211,7 @@ func evaluateCondition(condition string, scope map[string]string) bool {
 
 	// Substitute variables in condition (longest names first to prevent
 	// prefix collisions, e.g. $s matching inside $scheme).
-	condition = executor.SubstituteVars(condition, scope)
+	condition = executor.SubstituteVars(condition, scope, "dollar")
 
 	// Check for comparison operators
 	if strings.Contains(condition, "==") {
@@ -236,14 +236,22 @@ func evaluateCondition(condition string, scope map[string]string) bool {
 	return condition != ""
 }
 
-// replaceVar replaces `$varname` references in cmd with replacement.
-// Also replaces `<varname>` when the allow_angle_vars config flag is set.
-func replaceVar(cmd, varName, replacement string) string {
+// replaceVar replaces variable references in cmd with replacement.
+// Respects var_syntax config: replaces `$varname` when dollar syntax is
+// enabled, and `<varname>` when angle syntax is enabled.
+func replaceVar(cmd, varName, replacement string, syntax string) string {
 	q := regexp.QuoteMeta(varName)
-	pattern := `\$` + q + `\b`
-	if config.GetAllowAngleVars() {
-		pattern += `|<` + q + `>`
+	var parts []string
+	if syntax == "dollar" || syntax == "both" {
+		parts = append(parts, `\$`+q+`\b`)
 	}
+	if syntax == "angle" || syntax == "both" {
+		parts = append(parts, `<`+q+`>`)
+	}
+	if len(parts) == 0 {
+		return cmd
+	}
+	pattern := strings.Join(parts, "|")
 	re := regexp.MustCompile(pattern)
 	return re.ReplaceAllLiteralString(cmd, replacement)
 }
@@ -298,11 +306,13 @@ func executeOutput(command string, exec Executor) error {
 // ============================================================================
 
 // findAllVars finds ALL variable references in a command, ignoring quoting.
-// Always recognizes `$name`. Also recognizes `<name>` when the
-// allow_angle_vars config flag is set. `<name|default>` is never auto-resolved
-// (use a `<!-- cheat -->` block to declare defaults).
-func findAllVars(cmd string) []string {
-	allowAngle := config.GetAllowAngleVars()
+// The syntax parameter controls which variable forms are replaced:
+// "dollar", "angle", or "both".
+// `<name|default>` is never auto-resolved (use a `<!-- cheat -->` block to
+// declare defaults).
+func findAllVars(cmd string, syntax string) []string {
+	allowDollar := syntax == "dollar" || syntax == "both"
+	allowAngle := syntax == "angle" || syntax == "both"
 
 	var vars []string
 	seen := make(map[string]bool)
@@ -317,6 +327,9 @@ func findAllVars(cmd string) []string {
 	for i := 0; i < len(cmd); i++ {
 		switch cmd[i] {
 		case '$':
+			if !allowDollar {
+				continue
+			}
 			if i+1 >= len(cmd) {
 				continue
 			}

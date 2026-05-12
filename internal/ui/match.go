@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gubarz/cheatmd/internal/config"
 	"github.com/gubarz/cheatmd/internal/executor"
 	"github.com/gubarz/cheatmd/internal/parser"
 )
@@ -35,7 +36,17 @@ func findMatchingCheat(cheats []*parser.Cheat, input string) *parser.Cheat {
 // The slice may have duplicates (one entry per capture group) because Go
 // regex doesn't support backreferences.
 func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
-	varPattern := regexp.MustCompile(`\$(\w+)`)
+	var parts []string
+	if config.VarSyntaxAllowsDollar() {
+		parts = append(parts, `\$(\w+)`)
+	}
+	if config.VarSyntaxAllowsAngle() {
+		parts = append(parts, `<(\w+)>`)
+	}
+	if len(parts) == 0 {
+		parts = append(parts, `\$(\w+)`)
+	}
+	varPattern := regexp.MustCompile(strings.Join(parts, "|"))
 	allMatches := varPattern.FindAllStringSubmatchIndex(cmd, -1)
 
 	var varOrder []string
@@ -47,7 +58,14 @@ func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
 	for i, match := range allMatches {
 		varStart := match[0]
 		varEnd := match[1]
-		varName := cmd[match[2]:match[3]]
+		
+		var varName string
+		for j := 2; j < len(match); j += 2 {
+			if match[j] != -1 {
+				varName = cmd[match[j]:match[j+1]]
+				break
+			}
+		}
 
 		if varStart > lastEnd {
 			result.WriteString(regexp.QuoteMeta(cmd[lastEnd:varStart]))
@@ -173,7 +191,7 @@ func inferDependentVars(cheat *parser.Cheat, index *parser.CheatIndex) {
 					continue
 				}
 
-				literalResult := executor.SubstituteVars(def.Literal, cheat.Scope)
+				literalResult := executor.SubstituteVars(def.Literal, cheat.Scope, "dollar")
 
 				if strings.Contains(literalResult, "$") {
 					extracted := extractEmbeddedVars(def.Literal, prefillValue, cheat.Scope)
@@ -183,7 +201,7 @@ func inferDependentVars(cheat *parser.Cheat, index *parser.CheatIndex) {
 							changed = true
 						}
 					}
-					literalResult = executor.SubstituteVars(def.Literal, cheat.Scope)
+					literalResult = executor.SubstituteVars(def.Literal, cheat.Scope, "dollar")
 				}
 
 				if literalResult == prefillValue && condOp == "==" {

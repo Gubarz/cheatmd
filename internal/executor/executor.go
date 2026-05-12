@@ -163,7 +163,7 @@ func (e *Executor) Execute(command string) error {
 
 // BuildFinalCommand substitutes all variables in a cheat's command
 func (e *Executor) BuildFinalCommand(cheat *parser.Cheat) string {
-	result := SubstituteVars(cheat.Command, cheat.Scope)
+	result := SubstituteVars(cheat.Command, cheat.Scope, config.GetVarSyntax())
 
 	// Handle escaped dollar signs
 	result = strings.ReplaceAll(result, "\\$", "$")
@@ -171,10 +171,23 @@ func (e *Executor) BuildFinalCommand(cheat *parser.Cheat) string {
 	return result
 }
 
-// SubstituteVars replaces variables in a string using the given scope
-func SubstituteVars(s string, scope map[string]string) string {
+// SubstituteVars replaces variables in a string using the given scope.
+// The syntax parameter controls which variable forms are replaced:
+//   - "dollar": replaces $name
+//   - "angle": replaces <name>
+//   - "both": replaces both $name and <name>
+func SubstituteVars(s string, scope map[string]string, syntax string) string {
 	for _, name := range sortedNames(scope) {
-		s = strings.ReplaceAll(s, "$"+name, scope[name])
+		val := scope[name]
+		switch syntax {
+		case "angle":
+			s = strings.ReplaceAll(s, "<"+name+">", val)
+		case "both":
+			s = strings.ReplaceAll(s, "$"+name, val)
+			s = strings.ReplaceAll(s, "<"+name+">", val)
+		default: // "dollar"
+			s = strings.ReplaceAll(s, "$"+name, val)
+		}
 	}
 	return s
 }
