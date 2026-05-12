@@ -372,19 +372,7 @@ func GetColorDim() string {
 	return viper.GetString("color_dim")
 }
 
-// GetColors returns all color settings as a ColorConfig
-func GetColors() ColorConfig {
-	return ColorConfig{
-		Header:   GetColorHeader(),
-		Command:  GetColorCommand(),
-		Desc:     GetColorDesc(),
-		Path:     GetColorPath(),
-		Border:   GetColorBorder(),
-		Cursor:   GetColorCursor(),
-		Selected: GetColorSelected(),
-		Dim:      GetColorDim(),
-	}
-}
+
 
 // ============================================================================
 // Getters - Columns
@@ -410,15 +398,7 @@ func GetColumnCommand() int {
 	return viper.GetInt("column_command")
 }
 
-// GetColumns returns all column settings as a ColumnConfig
-func GetColumns() ColumnConfig {
-	return ColumnConfig{
-		Gap:     GetColumnGap(),
-		Header:  GetColumnHeader(),
-		Desc:    GetColumnDesc(),
-		Command: GetColumnCommand(),
-	}
-}
+
 
 // ============================================================================
 // Setters
@@ -430,11 +410,7 @@ func SetOutput(mode string) {
 	cfg.Output = mode
 }
 
-// SetPath sets the cheat path at runtime
-func SetPath(path string) {
-	viper.Set("path", path)
-	cfg.Path = path
-}
+
 
 // SetAutoSelect sets auto-select mode at runtime
 func SetAutoSelect(enabled bool) {

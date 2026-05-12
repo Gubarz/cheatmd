@@ -232,6 +232,7 @@ func runCheats(cmd *cobra.Command, args []string) error {
 
 	// Parse markdown files
 	benchmark, _ := cmd.Flags().GetBool("benchmark")
+
 	start := time.Now()
 
 	p := parser.NewParser()

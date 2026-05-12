@@ -1,6 +1,6 @@
 module github.com/gubarz/cheatmd
 
-go 1.25.1
+go 1.26.3
 
 require (
 	github.com/charmbracelet/bubbles v0.21.0

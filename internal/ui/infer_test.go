@@ -41,14 +41,19 @@ func TestExtractEmbeddedVars(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := extractEmbeddedVars(tt.template, tt.actual, tt.scope)
 
-			for key, expected := range tt.expected {
-				if actual, ok := result[key]; !ok {
-					t.Errorf("expected result[%q] = %q, but key not found", key, expected)
-				} else if actual != expected {
-					t.Errorf("expected result[%q] = %q, got %q", key, expected, actual)
-				}
-			}
+			assertMapEq(t, tt.expected, result)
 		})
+	}
+}
+
+func assertMapEq(t *testing.T, expected, actual map[string]string) {
+	t.Helper()
+	for key, exp := range expected {
+		if act, ok := actual[key]; !ok {
+			t.Errorf("expected map[%q] = %q, but key not found. map=%v", key, exp, actual)
+		} else if act != exp {
+			t.Errorf("expected map[%q] = %q, got %q", key, exp, act)
+		}
 	}
 }
 
@@ -110,13 +115,7 @@ func TestPrefillScopeFromMatch(t *testing.T) {
 
 			prefillScopeFromMatch(cheat, tt.input)
 
-			for key, expected := range tt.expectedScope {
-				if actual, ok := cheat.Scope[key]; !ok {
-					t.Errorf("expected scope[%q] = %q, but key not found. scope=%v", key, expected, cheat.Scope)
-				} else if actual != expected {
-					t.Errorf("expected scope[%q] = %q, got %q", key, expected, actual)
-				}
-			}
+			assertMapEq(t, tt.expectedScope, cheat.Scope)
 		})
 	}
 }
@@ -176,13 +175,7 @@ func TestInferDependentVars(t *testing.T) {
 
 			inferDependentVars(cheat, index)
 
-			for key, expected := range tt.expectedScope {
-				if actual, ok := cheat.Scope[key]; !ok {
-					t.Errorf("expected scope[%q] = %q, but key not found. scope=%v", key, expected, cheat.Scope)
-				} else if actual != expected {
-					t.Errorf("expected scope[%q] = %q, got %q", key, expected, actual)
-				}
-			}
+			assertMapEq(t, tt.expectedScope, cheat.Scope)
 		})
 	}
 }
