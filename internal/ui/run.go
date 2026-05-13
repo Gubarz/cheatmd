@@ -10,8 +10,35 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/gubarz/cheatmd/internal/config"
+	"github.com/gubarz/cheatmd/internal/history"
 	"github.com/gubarz/cheatmd/internal/parser"
 )
+
+// recordRun appends one entry to the history file. Errors are silently
+// dropped; history is best-effort, never blocking execution.
+func recordRun(cheat *parser.Cheat, finalCmd string) {
+	if cheat == nil || finalCmd == "" {
+		return
+	}
+	path, err := history.DefaultPath(config.GetHistoryFile())
+	if err != nil {
+		return
+	}
+	// Copy scope so later mutations to cheat.Scope can't corrupt the entry.
+	var scopeCopy map[string]string
+	if len(cheat.Scope) > 0 {
+		scopeCopy = make(map[string]string, len(cheat.Scope))
+		for k, v := range cheat.Scope {
+			scopeCopy[k] = v
+		}
+	}
+	_ = history.Append(path, history.Entry{
+		Command: finalCmd,
+		File:    cheat.File,
+		Header:  cheat.Header,
+		Scope:   scopeCopy,
+	})
+}
 
 // getTTY returns file handles for TUI input/output. Uses /dev/tty to bypass
 // shell pipes and command substitution when stdout is not a terminal.
@@ -48,6 +75,13 @@ func getTTY() (in *os.File, out *os.File, cleanup func()) {
 
 // RunTUI launches the Bubble Tea interface (unified, no flicker).
 func RunTUI(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string) error {
+	return RunTUIWithStart(index, exec, initialQuery, matchCmd, phaseCheatSelect)
+}
+
+// RunTUIWithStart launches the TUI and (optionally) jumps directly into a
+// non-default starting phase. startPhase == phaseCheatSelect behaves the
+// same as RunTUI; phaseHistory opens the history overlay on entry.
+func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string, startPhase uiPhase) error {
 	requireCheatBlock := config.GetRequireCheatBlock()
 	autoSelect := config.GetAutoSelect()
 
@@ -67,6 +101,7 @@ func RunTUI(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd stri
 
 			if m.phase != phaseVarResolve {
 				finalCmd := exec.BuildFinalCommand(m.selected)
+				recordRun(m.selected, finalCmd)
 				return executeOutput(finalCmd, exec)
 			}
 
@@ -92,8 +127,18 @@ func RunTUI(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd stri
 
 			if m.phase != phaseVarResolve {
 				finalCmd := exec.BuildFinalCommand(m.selected)
+				recordRun(m.selected, finalCmd)
 				return executeOutput(finalCmd, exec)
 			}
+		}
+	}
+
+	// If a non-default start phase is requested, transition into it before
+	// starting the bubbletea program. Only phaseHistory is supported as a
+	// jump-start currently; unsupported values are ignored.
+	if startPhase == phaseHistory && m.phase == phaseCheatSelect {
+		if !m.enterHistory() {
+			return fmt.Errorf("no history yet (run some cheats first)")
 		}
 	}
 
@@ -116,6 +161,7 @@ func RunTUI(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd stri
 	}
 
 	finalCmd := exec.BuildFinalCommand(result.selected)
+	recordRun(result.selected, finalCmd)
 	return executeOutput(finalCmd, exec)
 }
 
