@@ -18,10 +18,15 @@ import (
 // The user enters via the configured key during phaseCheatSelect or
 // phaseVarResolve and returns to the previous phase on Esc.
 type previewOverlayState struct {
-	viewport viewport.Model
-	cheat    *parser.Cheat // cheat whose file is being shown
-	prevPhase uiPhase      // phase to restore on exit
-	errorMsg string        // non-empty if rendering or reading failed
+	viewport  viewport.Model
+	cheat     *parser.Cheat // cheat whose file is being shown
+	prevPhase uiPhase       // phase to restore on exit
+	errorMsg  string        // non-empty if rendering or reading failed
+}
+
+type previewPendingCodeBlock struct {
+	command    string
+	headerLine int
 }
 
 // enterPreview transitions to phasePreview with the markdown rendering of the
@@ -55,8 +60,10 @@ func (m *mainModel) enterPreview(c *parser.Cheat) bool {
 	vp.SetContent(rendered)
 
 	// Scroll so the cheat's header is near the top of the viewport.
-	if line := findHeaderLine(rendered, c.Header); line >= 0 {
-		vp.SetYOffset(line)
+	if line := findCheatHeaderSourceLine(string(data), c); line >= 0 {
+		if offset, ok := renderedOffsetForSourceLine(string(data), line, vp.Width); ok {
+			vp.SetYOffset(offset)
+		}
 	}
 
 	m.previewState = &previewOverlayState{
@@ -283,21 +290,170 @@ func cheatmdGlamourStyle() ansi.StyleConfig {
 	}
 }
 
-// findHeaderLine returns the line number in rendered where the given heading
-// text first appears, or -1 if not found. Used to scroll the viewport so the
-// cheat's section is visible on open.
-func findHeaderLine(rendered, header string) int {
-	if header == "" {
+// findCheatHeaderSourceLine returns the source line of the markdown heading
+// attached to cheat. This avoids snapping to an earlier page title with the
+// same text after glamour has rendered the whole document.
+func findCheatHeaderSourceLine(raw string, cheat *parser.Cheat) int {
+	if cheat == nil {
 		return -1
 	}
-	needle := strings.TrimSpace(header)
-	if needle == "" {
-		return -1
+
+	var (
+		currentHeaderLine = -1
+		inCodeFence       bool
+		inCheatBlock      bool
+		codeLines         []string
+		pending           []previewPendingCodeBlock
+	)
+
+	lines := strings.Split(raw, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if inCodeFence {
+			if strings.HasPrefix(trimmed, "```") {
+				inCodeFence = false
+				command := strings.TrimSpace(strings.Join(codeLines, "\n"))
+				if command != "" {
+					pending = append(pending, previewPendingCodeBlock{
+						command:    command,
+						headerLine: currentHeaderLine,
+					})
+				}
+				codeLines = nil
+				continue
+			}
+			codeLines = append(codeLines, line)
+			continue
+		}
+
+		if inCheatBlock {
+			if trimmed == "-->" {
+				inCheatBlock = false
+				if len(pending) > 0 {
+					last := pending[len(pending)-1]
+					if last.command == strings.TrimSpace(cheat.Command) {
+						return last.headerLine
+					}
+					pending = pending[:len(pending)-1]
+				}
+			}
+			continue
+		}
+
+		if header, ok := parsePreviewHeader(trimmed); ok {
+			if currentHeaderLine >= 0 {
+				if line := findPendingCommandHeaderLine(pending, cheat); line >= 0 {
+					return line
+				}
+				pending = nil
+			}
+			if header == strings.TrimSpace(cheat.Header) {
+				currentHeaderLine = i
+			} else {
+				currentHeaderLine = -1
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeFence = true
+			codeLines = nil
+			continue
+		}
+
+		if content, ok := parsePreviewCheatSingleLine(trimmed); ok {
+			_ = content
+			if len(pending) > 0 {
+				last := pending[len(pending)-1]
+				if last.command == strings.TrimSpace(cheat.Command) {
+					return last.headerLine
+				}
+				pending = pending[:len(pending)-1]
+			}
+			continue
+		}
+
+		if isPreviewCheatStart(trimmed) {
+			inCheatBlock = true
+			continue
+		}
 	}
-	for i, line := range strings.Split(rendered, "\n") {
-		if strings.Contains(line, needle) {
-			return i
+
+	return findPendingCommandHeaderLine(pending, cheat)
+}
+
+func findPendingCommandHeaderLine(pending []previewPendingCodeBlock, cheat *parser.Cheat) int {
+	target := strings.TrimSpace(cheat.Command)
+	for _, block := range pending {
+		if block.command == target {
+			return block.headerLine
 		}
 	}
 	return -1
+}
+
+func renderedOffsetForSourceLine(raw string, sourceLine, width int) (int, bool) {
+	if sourceLine < 0 {
+		return 0, false
+	}
+	lines := strings.Split(raw, "\n")
+	if sourceLine > len(lines) {
+		return 0, false
+	}
+	prefix := strings.Join(lines[:sourceLine], "\n")
+	if strings.TrimSpace(prefix) == "" {
+		return 0, true
+	}
+	rendered, err := renderMarkdown(prefix, width)
+	if err != nil {
+		return 0, false
+	}
+	offset := strings.Count(rendered, "\n")
+	if offset > 0 {
+		offset--
+	}
+	return offset, true
+}
+
+func parsePreviewHeader(trimmed string) (string, bool) {
+	level := 0
+	for level < len(trimmed) && trimmed[level] == '#' {
+		level++
+	}
+	if level == 0 || level > 6 {
+		return "", false
+	}
+	if level == len(trimmed) {
+		return "", true
+	}
+	if trimmed[level] != ' ' && trimmed[level] != '\t' {
+		return "", false
+	}
+	return strings.TrimSpace(trimmed[level:]), true
+}
+
+func parsePreviewCheatSingleLine(trimmed string) (string, bool) {
+	if !strings.HasPrefix(trimmed, "<!--") || !strings.HasSuffix(trimmed, "-->") {
+		return "", false
+	}
+	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "<!--"), "-->"))
+	if len(inner) < len("cheat") || !strings.EqualFold(inner[:len("cheat")], "cheat") {
+		return "", false
+	}
+	if len(inner) > len("cheat") {
+		next := inner[len("cheat")]
+		if next != ' ' && next != '\t' {
+			return "", false
+		}
+	}
+	return strings.TrimSpace(inner[len("cheat"):]), true
+}
+
+func isPreviewCheatStart(trimmed string) bool {
+	if !strings.HasPrefix(trimmed, "<!--") {
+		return false
+	}
+	inner := strings.TrimSpace(strings.TrimPrefix(trimmed, "<!--"))
+	return strings.EqualFold(inner, "cheat")
 }
