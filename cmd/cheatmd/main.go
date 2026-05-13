@@ -56,6 +56,7 @@ func init() {
 	rootCmd.PersistentFlags().Bool("exec", false, "Execute command (shorthand for -o exec)")
 	rootCmd.PersistentFlags().Bool("auto", false, "Auto-select if query matches exactly one result")
 	rootCmd.PersistentFlags().BoolP("benchmark", "b", false, "Benchmark load time and exit")
+	rootCmd.PersistentFlags().Bool("history", false, "Open the execution history picker")
 
 	viper.BindPFlag("output", rootCmd.PersistentFlags().Lookup("output"))
 }
@@ -276,7 +277,10 @@ func runCheats(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Run the TUI
+	// Run the TUI (history view if --history was passed)
+	if historyFlag, _ := cmd.Flags().GetBool("history"); historyFlag {
+		return ui.RunHistory(index, exec)
+	}
 	return ui.Run(index, exec, query, match)
 }
 

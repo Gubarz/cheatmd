@@ -172,6 +172,17 @@ auto-scrolled to the cheat's heading. `↑/↓`/`PgUp/PgDn` scroll, `Esc` or `q`
 returns. Useful for reading the surrounding notes (descriptions, links,
 warnings) without leaving the TUI.
 
+### Execution history
+
+Every time you run a cheat, the final substituted command plus the cheat's
+file/header reference and the resolved variable values are appended to
+`$XDG_DATA_HOME/cheatmd/history.jsonl` (falling back to
+`~/.local/share/cheatmd/history.jsonl`). Press `Ctrl-H` in the cheat picker
+to open the history overlay, or launch directly with `cheatmd --history`.
+Pick an entry with `Enter` to re-open the original cheat with its previous
+values pre-filled, so you can confirm or edit any variable before running
+again. `Esc` cancels.
+
 ## DSL
 
 ```

@@ -219,6 +219,11 @@ func (m *mainModel) handleCheatSelectKey(msg tea.KeyMsg) tea.Cmd {
 				}
 			}
 		}
+		if msg.String() == config.GetKeyHistory() {
+			if m.enterHistory() {
+				return tea.ClearScreen
+			}
+		}
 	}
 	return nil
 }

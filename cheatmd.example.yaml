@@ -21,6 +21,16 @@ key_substitute: "ctrl+t"
 # key_preview: opens a full-screen markdown preview of the current cheat's
 # source file, scrolled to the cheat's section. Esc / q closes.
 key_preview: "ctrl+y"
+# key_history: opens the execution history picker. Enter on an entry re-opens
+# the original cheat with its previous variable values pre-filled.
+key_history: "ctrl+h"
+
+# Execution history. Each cheat run appends a line to history_file as JSONL.
+#   history_file - path override; empty means $XDG_DATA_HOME/cheatmd/history.jsonl
+#                  (or ~/.local/share/cheatmd/history.jsonl as a fallback).
+#   history_max  - max entries shown in the picker; 0 = unlimited.
+history_file: ""
+history_max: 1000
 
 # Substitute search sources. Valid entries: "env", "history".
 # Empty list disables the feature.

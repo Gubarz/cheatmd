@@ -31,6 +31,11 @@ type Config struct {
 	KeyOpen       string `mapstructure:"key_open"`
 	KeySubstitute string `mapstructure:"key_substitute"`
 	KeyPreview    string `mapstructure:"key_preview"`
+	KeyHistory    string `mapstructure:"key_history"`
+
+	// Execution history
+	HistoryFile string `mapstructure:"history_file"`
+	HistoryMax  int    `mapstructure:"history_max"`
 
 	// Substitute search
 	SubstituteSources []string `mapstructure:"substitute_sources"`
@@ -88,6 +93,9 @@ var defaults = struct {
 	keyOpen           string
 	keySubstitute     string
 	keyPreview        string
+	keyHistory        string
+	historyFile       string
+	historyMax        int
 	substituteSources []string
 	showFolder        bool
 	showFile          bool
@@ -110,6 +118,9 @@ var defaults = struct {
 	keyOpen:           "ctrl+o",           // Ctrl+O in TUI
 	keySubstitute:     "ctrl+t",           // Ctrl+T opens substitute search during var resolution
 	keyPreview:        "ctrl+y",           // Ctrl+Y opens markdown preview of current cheat's file
+	keyHistory:        "ctrl+h",           // Ctrl+H opens execution history
+	historyFile:       "",                 // Empty -> $XDG_DATA_HOME/cheatmd/history.jsonl
+	historyMax:        1000,
 	substituteSources: []string{"env", "history"},
 	showFolder:        true,
 	showFile:          true,
@@ -177,6 +188,11 @@ func setDefaults() {
 	viper.SetDefault("key_open", defaults.keyOpen)
 	viper.SetDefault("key_substitute", defaults.keySubstitute)
 	viper.SetDefault("key_preview", defaults.keyPreview)
+	viper.SetDefault("key_history", defaults.keyHistory)
+
+	// Execution history
+	viper.SetDefault("history_file", defaults.historyFile)
+	viper.SetDefault("history_max", defaults.historyMax)
 
 	// Substitute search
 	viper.SetDefault("substitute_sources", defaults.substituteSources)
@@ -328,6 +344,24 @@ func GetKeySubstitute() string {
 // the current cheat's source file (e.g., "ctrl+y").
 func GetKeyPreview() string {
 	return viper.GetString("key_preview")
+}
+
+// GetKeyHistory returns the keybinding for opening the execution history
+// overlay (e.g., "ctrl+h").
+func GetKeyHistory() string {
+	return viper.GetString("key_history")
+}
+
+// GetHistoryFile returns the override path for the history file, or "" for
+// the default ($XDG_DATA_HOME/cheatmd/history.jsonl).
+func GetHistoryFile() string {
+	return viper.GetString("history_file")
+}
+
+// GetHistoryMax returns the cap on history entries shown in the picker.
+// Zero or negative means unlimited.
+func GetHistoryMax() int {
+	return viper.GetInt("history_max")
 }
 
 // GetSubstituteSources returns the enabled sources for substitute search.

@@ -21,6 +21,12 @@ func Run(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string)
 	return RunTUI(index, exec, initialQuery, matchCmd)
 }
 
+// RunHistory launches the TUI with the history overlay open. If history is
+// empty or unreadable, an error is returned without entering the TUI.
+func RunHistory(index *parser.CheatIndex, exec Executor) error {
+	return RunTUIWithStart(index, exec, "", "", phaseHistory)
+}
+
 // ============================================================================
 // Variable Resolution
 // ============================================================================
