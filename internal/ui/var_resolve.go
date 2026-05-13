@@ -399,6 +399,13 @@ func (m *mainModel) handleVarResolveKey(msg tea.KeyMsg) tea.Cmd {
 				return tea.Batch(tea.ClearScreen, textinput.Blink)
 			}
 		}
+		if msg.String() == config.GetKeyPreview() {
+			if m.varState != nil && m.varState.cheat != nil {
+				if m.enterPreview(m.varState.cheat) {
+					return tea.ClearScreen
+				}
+			}
+		}
 	}
 	return nil
 }

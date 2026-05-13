@@ -212,6 +212,13 @@ func (m *mainModel) handleCheatSelectKey(msg tea.KeyMsg) tea.Cmd {
 				openFileInViewer(m.filtered[m.cursor].cheat.File)
 			}
 		}
+		if msg.String() == config.GetKeyPreview() {
+			if m.cursor < len(m.filtered) {
+				if m.enterPreview(m.filtered[m.cursor].cheat) {
+					return tea.ClearScreen
+				}
+			}
+		}
 	}
 	return nil
 }

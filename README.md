@@ -148,6 +148,10 @@ auto_continue: false   # Auto-accept env vars without prompting
 # environment variables and shell history for a value to insert)
 key_substitute: "ctrl+t"
 substitute_sources: ["env", "history"]   # set to [] to disable
+
+# Markdown preview (press Ctrl-Y to open the current cheat's source file
+# rendered as markdown, scrolled to the cheat's section)
+key_preview: "ctrl+y"
 ```
 
 ### Substitute search
@@ -159,6 +163,14 @@ assignments) found in shell history. Plain commands in history are ignored.
 Pick a row, its value is loaded into the prompt; press `Enter` to accept or
 edit it first. `Esc` cancels back to the var prompt. History is read from
 `$HISTFILE`, falling back to `~/.bash_history` or `~/.zsh_history`.
+
+### Markdown preview
+
+Press `Ctrl-Y` at any cheat (from the picker or while resolving variables) to
+open the cheat's source file rendered as markdown in a full-screen overlay,
+auto-scrolled to the cheat's heading. `↑/↓`/`PgUp/PgDn` scroll, `Esc` or `q`
+returns. Useful for reading the surrounding notes (descriptions, links,
+warnings) without leaving the TUI.
 
 ## DSL
 

@@ -51,6 +51,7 @@ const (
 	phaseCheatSelect      uiPhase = iota // Selecting a cheat
 	phaseVarResolve                      // Resolving variables
 	phaseSubstituteSearch                // Substitute-search overlay during var resolution
+	phasePreview                         // Full-screen markdown preview of cheat's source file
 )
 
 // mainModel is the Bubble Tea model for cheat selection AND variable resolution
@@ -79,6 +80,9 @@ type mainModel struct {
 
 	// Substitute search state (only used in phaseSubstituteSearch)
 	subState *substituteSearchState
+
+	// Preview overlay state (only used in phasePreview)
+	previewState *previewOverlayState
 
 	// Dependencies for variable resolution
 	cheatIndex *parser.CheatIndex
@@ -148,6 +152,8 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Dispatch based on phase
 	switch m.phase {
+	case phasePreview:
+		return m.updatePreview(msg)
 	case phaseSubstituteSearch:
 		return m.updateSubstituteSearch(msg)
 	case phaseVarResolve:
@@ -166,6 +172,8 @@ func (m *mainModel) View() string {
 
 	// Dispatch based on phase
 	switch m.phase {
+	case phasePreview:
+		return m.renderPreview()
 	case phaseSubstituteSearch:
 		return m.renderSubstituteSearch()
 	case phaseVarResolve:

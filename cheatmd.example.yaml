@@ -18,6 +18,9 @@ key_open: "ctrl+o"
 # key_substitute: opens a fuzzy search of env vars + shell history during
 # variable resolution, lets you pick a value to substitute into the prompt.
 key_substitute: "ctrl+t"
+# key_preview: opens a full-screen markdown preview of the current cheat's
+# source file, scrolled to the cheat's section. Esc / q closes.
+key_preview: "ctrl+y"
 
 # Substitute search sources. Valid entries: "env", "history".
 # Empty list disables the feature.
