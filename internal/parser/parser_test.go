@@ -157,6 +157,38 @@ func TestParseCheatDSL_Comments(t *testing.T) {
 	}
 }
 
+func TestParseSingleLineEmptyCheatComment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "single.md")
+	content := "# Cheats\n\n## Empty metadata\n\n```sh\necho hi\n```\n<!-- cheat -->\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewParser()
+	index, err := p.ParseSingleFile(path)
+	if err != nil {
+		t.Fatalf("ParseSingleFile() error: %v", err)
+	}
+
+	if len(index.Cheats) != 1 {
+		t.Fatalf("ParseSingleFile() cheats = %d, want 1", len(index.Cheats))
+	}
+	cheat := index.Cheats[0]
+	if !cheat.HasCheatBlock {
+		t.Fatal("single-line <!-- cheat --> did not mark cheat as having a cheat block")
+	}
+	if cheat.Command != "echo hi" {
+		t.Fatalf("command = %q, want %q", cheat.Command, "echo hi")
+	}
+}
+
+func TestParseCheatSingleLineRequiresKeywordBoundary(t *testing.T) {
+	if _, ok := parseCheatSingleLine([]byte("<!-- cheating -->")); ok {
+		t.Fatal("parseCheatSingleLine accepted non-cheat keyword")
+	}
+}
+
 func TestNewCheatIndex(t *testing.T) {
 	idx := NewCheatIndex()
 	if idx == nil {

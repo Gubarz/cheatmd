@@ -141,7 +141,7 @@ func parseCodeBlockStart(line []byte) (lang, desc string, ok bool) {
 
 // parseCheatSingleLine parses <!-- cheat ... --> and returns the content.
 func parseCheatSingleLine(line []byte) (string, bool) {
-	if len(line) < 15 {
+	if len(line) < len("<!--cheat-->") {
 		return "", false
 	}
 	if !bytes.HasPrefix(line, []byte("<!--")) {
@@ -156,6 +156,9 @@ func parseCheatSingleLine(line []byte) (string, bool) {
 		return "", false
 	}
 	if !bytes.EqualFold(inner[:5], []byte("cheat")) {
+		return "", false
+	}
+	if len(inner) > 5 && inner[5] != ' ' && inner[5] != '\t' {
 		return "", false
 	}
 
