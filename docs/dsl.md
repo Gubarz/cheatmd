@@ -94,10 +94,11 @@ var url  := https://$host/api/v1
 
 ### Selector options (`--- ...`)
 
-Add `--- <opts>` after either `=` or `:=`. Options are space-separated; quote
-values that contain spaces.
+Add `--- <opts>` after prompt-only, `=`, or `:=` vars. Options are
+space-separated; quote values that contain spaces.
 
 ```text
+var name --- --header "Enter a value"
 var name = <shell> --- --header "Pick one" --column 2 --select-column 1
 ```
 
