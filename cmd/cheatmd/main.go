@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/gubarz/cheatmd/internal/config"
 	"github.com/gubarz/cheatmd/internal/executor"
+	"github.com/gubarz/cheatmd/internal/linter"
 	"github.com/gubarz/cheatmd/internal/parser"
 	"github.com/gubarz/cheatmd/internal/ui"
 	"github.com/spf13/cobra"
@@ -33,8 +35,9 @@ Then press Ctrl+G to trigger the cheatmd selector.`,
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "cheatmd [path]",
-	Short: "Executable Markdown Cheatsheets",
+	Use:          "cheatmd [path]",
+	Short:        "Executable Markdown Cheatsheets",
+	SilenceUsage: true,
 	Long: `Command cheatsheet tool that uses real Markdown files.
 
 Browse your cheatsheets interactively, select commands,
@@ -57,6 +60,8 @@ func init() {
 	rootCmd.PersistentFlags().Bool("auto", false, "Auto-select if query matches exactly one result")
 	rootCmd.PersistentFlags().BoolP("benchmark", "b", false, "Benchmark load time and exit")
 	rootCmd.PersistentFlags().Bool("history", false, "Open the execution history picker")
+	rootCmd.PersistentFlags().Bool("lint", false, "Lint cheats and exit")
+	rootCmd.PersistentFlags().Bool("strict", false, "Treat lint warnings as errors")
 
 	viper.BindPFlag("output", rootCmd.PersistentFlags().Lookup("output"))
 }
@@ -231,6 +236,11 @@ func runCheats(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("path error: %w", err)
 	}
 
+	lintFlag, _ := cmd.Flags().GetBool("lint")
+	if lintFlag {
+		return runLint(cmd, absPath)
+	}
+
 	// Parse markdown files
 	benchmark, _ := cmd.Flags().GetBool("benchmark")
 
@@ -282,6 +292,65 @@ func runCheats(cmd *cobra.Command, args []string) error {
 		return ui.RunHistory(index, exec)
 	}
 	return ui.Run(index, exec, query, match)
+}
+
+func runLint(cmd *cobra.Command, path string) error {
+	findings, err := linter.Lint(path)
+	if err != nil {
+		return fmt.Errorf("lint error: %w", err)
+	}
+
+	useColor := stdoutIsTerminal()
+	hasErrors := false
+	hasWarnings := false
+	for _, f := range findings {
+		if f.Severity == linter.SeverityError {
+			hasErrors = true
+		}
+		if f.Severity == linter.SeverityWarning {
+			hasWarnings = true
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), formatLintFinding(f, useColor))
+	}
+
+	if len(findings) == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "No lint findings.")
+		return nil
+	}
+
+	strict, _ := cmd.Flags().GetBool("strict")
+	if hasErrors || (strict && hasWarnings) {
+		return fmt.Errorf("lint failed with %d finding(s)", len(findings))
+	}
+	return nil
+}
+
+func formatLintFinding(f linter.Finding, color bool) string {
+	if !color {
+		return f.Format()
+	}
+	severity := f.Severity.String()
+	switch f.Severity {
+	case linter.SeverityError:
+		severity = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render(severity)
+	default:
+		severity = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true).Render(severity)
+	}
+
+	line := f.Line
+	if line < 1 {
+		line = 1
+	}
+	col := f.Column
+	if col < 1 {
+		col = 1
+	}
+	return fmt.Sprintf("%s:%d:%d: %s: %s", f.File, line, col, severity, f.Message)
+}
+
+func stdoutIsTerminal() bool {
+	info, err := os.Stdout.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
 func main() {

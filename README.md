@@ -16,6 +16,7 @@ go install github.com/gubarz/cheatmd/cmd/cheatmd@latest
 cheatmd                    # Browse current directory
 cheatmd ~/cheats           # Browse specific directory
 cheatmd -q "docker"        # Start with search query
+cheatmd --lint ~/cheats    # Check cheats for syntax/reference issues
 ```
 
 ### Shell Widget
@@ -182,6 +183,19 @@ to open the history overlay, or launch directly with `cheatmd --history`.
 Pick an entry with `Enter` to re-open the original cheat with its previous
 values pre-filled, so you can confirm or edit any variable before running
 again. `Esc` cancels.
+
+### Linting
+
+Run `cheatmd --lint [path]` to validate a cheats file or directory without
+opening the picker. Findings are printed in GCC style:
+
+```text
+file.md:12:1: error: import "common" does not resolve to any exported module
+```
+
+The linter checks DSL syntax, missing imports, duplicate exports, undeclared
+command variables, empty or duplicate `##` headings, and cheats with no code
+block. Warnings do not fail the command unless you pass `--strict`.
 
 ## DSL
 
