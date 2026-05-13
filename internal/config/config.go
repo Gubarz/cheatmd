@@ -30,6 +30,7 @@ type Config struct {
 	KeyWidget     string `mapstructure:"key_widget"`
 	KeyOpen       string `mapstructure:"key_open"`
 	KeySubstitute string `mapstructure:"key_substitute"`
+	KeyPreview    string `mapstructure:"key_preview"`
 
 	// Substitute search
 	SubstituteSources []string `mapstructure:"substitute_sources"`
@@ -86,6 +87,7 @@ var defaults = struct {
 	keyWidget         string
 	keyOpen           string
 	keySubstitute     string
+	keyPreview        string
 	substituteSources []string
 	showFolder        bool
 	showFile          bool
@@ -107,6 +109,7 @@ var defaults = struct {
 	keyWidget:         "\\C-g",            // Ctrl+G for shell widgets
 	keyOpen:           "ctrl+o",           // Ctrl+O in TUI
 	keySubstitute:     "ctrl+t",           // Ctrl+T opens substitute search during var resolution
+	keyPreview:        "ctrl+y",           // Ctrl+Y opens markdown preview of current cheat's file
 	substituteSources: []string{"env", "history"},
 	showFolder:        true,
 	showFile:          true,
@@ -173,6 +176,7 @@ func setDefaults() {
 	viper.SetDefault("key_widget", defaults.keyWidget)
 	viper.SetDefault("key_open", defaults.keyOpen)
 	viper.SetDefault("key_substitute", defaults.keySubstitute)
+	viper.SetDefault("key_preview", defaults.keyPreview)
 
 	// Substitute search
 	viper.SetDefault("substitute_sources", defaults.substituteSources)
@@ -318,6 +322,12 @@ func GetKeyOpen() string {
 // during variable resolution (e.g., "ctrl+t").
 func GetKeySubstitute() string {
 	return viper.GetString("key_substitute")
+}
+
+// GetKeyPreview returns the keybinding for opening the markdown preview of
+// the current cheat's source file (e.g., "ctrl+y").
+func GetKeyPreview() string {
+	return viper.GetString("key_preview")
 }
 
 // GetSubstituteSources returns the enabled sources for substitute search.
