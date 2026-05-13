@@ -70,6 +70,39 @@ var domain = printf '%s\n' '$op_engagement_domain' "$(grep -v '^[[:space:]]*#' /
 	}
 }
 
+func TestLintAcceptsPromptOnlyVarWithArgs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netexec.md")
+	writeFile(t, path, `# NetExec
+
+## Auth
+
+`+"```sh"+`
+nxc smb $target $auth_flags
+`+"```"+`
+<!-- cheat
+var auth_method = printf 'hash\tUse NT hash\npassword\tUse password\nkerberos\tUse Kerberos ticket\n' --- --delimiter '\t'
+
+if $auth_method != kerberos
+var credential --- --header "Credential"
+fi
+
+if $auth_method == hash
+var auth_flags := -H $credential
+fi
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if hasFinding(findings, "missing an assignment operator") {
+		t.Fatalf("prompt-only var with args should be valid\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
 func TestLintReportsDuplicateExportsAndSingleLineSyntax(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "one.md"), `## Module One

@@ -157,6 +157,22 @@ func TestParseCheatDSL_Comments(t *testing.T) {
 	}
 }
 
+func TestParseCheatDSL_PromptOnlyWithArgs(t *testing.T) {
+	dslBlock := "if $auth_method != kerberos\nvar credential --- --header \"Credential\"\nfi"
+
+	cheat := &Cheat{}
+	parseCheatDSL(cheat, dslBlock)
+
+	if len(cheat.Vars) != 1 {
+		t.Fatalf("parseCheatDSL() parsed %d vars, want 1", len(cheat.Vars))
+	}
+
+	got := cheat.Vars[0]
+	if got.Name != "credential" || got.Args != `--header "Credential"` || got.Condition != "$auth_method != kerberos" {
+		t.Fatalf("prompt-only var = {Name:%q Args:%q Condition:%q}", got.Name, got.Args, got.Condition)
+	}
+}
+
 func TestParseSingleLineEmptyCheatComment(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "single.md")

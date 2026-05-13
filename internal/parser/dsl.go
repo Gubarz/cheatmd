@@ -45,6 +45,7 @@ func parseCheatDSL(cheat *Cheat, content string) {
 // parseVarLine handles the three var declaration forms:
 //
 //	var NAME           -> prompt-only
+//	var NAME --- args  -> prompt-only with selector/prompt args
 //	var NAME := value  -> literal
 //	var NAME = value   -> shell
 func parseVarLine(cheat *Cheat, rest, condition string) {
@@ -62,6 +63,12 @@ func parseVarLine(cheat *Cheat, rest, condition string) {
 	}
 
 	switch {
+	case strings.HasPrefix(after, "---"):
+		cheat.Vars = append(cheat.Vars, VarDef{
+			Name:      name,
+			Args:      strings.TrimSpace(after[3:]),
+			Condition: condition,
+		})
 	case strings.HasPrefix(after, ":="):
 		value := strings.TrimSpace(after[2:])
 		if value == "" {

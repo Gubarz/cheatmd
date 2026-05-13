@@ -201,6 +201,7 @@ block. Warnings do not fail the command unless you pass `--strict`.
 
 ```
 var <name>                         # Prompt user for a value
+var <name> --- <opts>              # Prompt with options, e.g. --header
 var <name> = <shell>               # Populate from shell output
 var <name> = <shell> --- <opts>    # With selector options (see below)
 var <name> := <value>              # Literal value (with $var substitution)
@@ -212,8 +213,8 @@ if $var == value                   # Conditional block (any var form works insid
 fi
 ```
 
-`--- --header "..."` works on both `=` and `:=`. Lines beginning with `#` inside
-a `<!-- cheat -->` block are comments.
+`--- --header "..."` works on prompt-only, `=`, and `:=` vars. Lines beginning
+with `#` inside a `<!-- cheat -->` block are comments.
 
 ### Selector Options
 

@@ -582,6 +582,8 @@ func lintVarLine(file string, lineNo int, rest string) []Finding {
 		return nil // prompt-only var, valid
 	}
 	switch {
+	case strings.HasPrefix(after, "---"):
+		return nil
 	case strings.HasPrefix(after, ":="):
 		if strings.TrimSpace(after[2:]) == "" {
 			return []Finding{{
