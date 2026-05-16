@@ -23,7 +23,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gubarz/cheatmd/internal/parser"
+	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
 // Severity classifies a finding.

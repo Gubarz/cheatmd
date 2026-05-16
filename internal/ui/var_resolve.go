@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/gubarz/cheatmd/internal/config"
-	"github.com/gubarz/cheatmd/internal/executor"
+	"github.com/gubarz/cheatmd/pkg/config"
+	"github.com/gubarz/cheatmd/pkg/executor"
 )
 
 // ============================================================================

@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gubarz/cheatmd/internal/config"
-	"github.com/gubarz/cheatmd/internal/executor"
-	"github.com/gubarz/cheatmd/internal/parser"
+	"github.com/gubarz/cheatmd/pkg/config"
+	"github.com/gubarz/cheatmd/pkg/executor"
+	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
 // ============================================================================

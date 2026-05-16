@@ -9,8 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/gubarz/cheatmd/internal/config"
-	"github.com/gubarz/cheatmd/internal/parser"
+	"github.com/gubarz/cheatmd/pkg/config"
+	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
 // ============================================================================

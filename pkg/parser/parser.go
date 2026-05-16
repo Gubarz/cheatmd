@@ -68,67 +68,53 @@ func parseFilesParallel(files []string) []parseResult {
 	numFiles := len(files)
 	estimatedCheats := max(numFiles*35, 1000)
 
-	// Stage 1: Parallel I/O - read raw bytes
-	type fileData struct {
-		path string
-		data []byte
-	}
-	fileDataChan := make(chan fileData, numFiles)
-	fileChan := make(chan string, numFiles)
-
-	var ioWg sync.WaitGroup
-	ioWorkers := min(numWorkers*2, numFiles)
-	for w := 0; w < ioWorkers; w++ {
-		ioWg.Add(1)
-		go func() {
-			defer ioWg.Done()
-			for path := range fileChan {
-				if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
-					fileDataChan <- fileData{path: path, data: data}
-				}
-			}
-		}()
-	}
-
-	go func() {
-		for _, path := range files {
-			fileChan <- path
-		}
-		close(fileChan)
-		ioWg.Wait()
-		close(fileDataChan)
-	}()
-
-	// Stage 2: Parallel parsing - parse from raw bytes
 	resultChan := make(chan parseResult, numWorkers)
 	var parseWg sync.WaitGroup
 
+	chunkSize := (numFiles + numWorkers - 1) / numWorkers
+	if chunkSize == 0 {
+		chunkSize = 1
+	}
+
 	for w := 0; w < numWorkers; w++ {
+		start := w * chunkSize
+		if start >= numFiles {
+			break
+		}
+		end := start + chunkSize
+		if end > numFiles {
+			end = numFiles
+		}
+
+		chunk := files[start:end]
 		parseWg.Add(1)
-		go func() {
+
+		go func(fileChunk []string) {
 			defer parseWg.Done()
 			localParser := NewParser()
 			localCheats := make([]*Cheat, 0, estimatedCheats/numWorkers)
 			localModules := make(map[string]*Module)
 			var localDuplicates []DuplicateExport
 
-			for fd := range fileDataChan {
-				localParser.index = NewCheatIndex()
-				localParser.parseLines(fd.path, fd.data)
-				localCheats = append(localCheats, localParser.index.Cheats...)
-				for name, mod := range localParser.index.Modules {
-					if existing, ok := localModules[name]; ok {
-						localDuplicates = append(localDuplicates, DuplicateExport{
-							Name:  name,
-							File1: existing.File,
-							File2: mod.File,
-						})
+			for _, path := range fileChunk {
+				if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+					localParser.index = NewCheatIndex()
+					localParser.parseLines(path, data)
+					localCheats = append(localCheats, localParser.index.Cheats...)
+					for name, mod := range localParser.index.Modules {
+						if existing, ok := localModules[name]; ok {
+							localDuplicates = append(localDuplicates, DuplicateExport{
+								Name:  name,
+								File1: existing.File,
+								File2: mod.File,
+							})
+						}
+						localModules[name] = mod
 					}
-					localModules[name] = mod
 				}
 			}
 			resultChan <- parseResult{cheats: localCheats, modules: localModules, duplicates: localDuplicates}
-		}()
+		}(chunk)
 	}
 
 	go func() {
@@ -291,13 +277,7 @@ func (p *Parser) parseLines(path string, data []byte) {
 }
 
 func countNewlines(b []byte) int {
-	count := 0
-	for _, c := range b {
-		if c == '\n' {
-			count++
-		}
-	}
-	return count
+	return bytes.Count(b, []byte{'\n'})
 }
 
 // parseLine processes a single line (as bytes, no allocation)
