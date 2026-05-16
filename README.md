@@ -60,26 +60,26 @@ Press `Ctrl+n` to open cheatmd in a floating pane.
 
 ### Basic
 
-```markdown
+````markdown
 ## Docker: list containers
 
-` ` `sh title:"Show all running containers"
+```sh title:"Show all running containers"
 docker ps
-` ` `
 ```
+````
 
 ### With Variables
 
-```markdown
+````markdown
 ## Docker: exec into container
 
-` ` `sh title:"Execute shell in container"
+```sh title:"Execute shell in container"
 docker exec -it $container /bin/sh
-` ` `
+```
 <!-- cheat
 var container = docker ps --format "{{.Names}}" --- --header "Select container"
 -->
-```
+````
 
 Variables are populated from shell command output:
 - **0 lines** → manual input prompt
@@ -99,13 +99,13 @@ references are silently skipped. Two config knobs relax that:
 With `var_syntax: both` and `allow_undeclared_vars: true`, this cheat works
 with no metadata block:
 
-```markdown
+````markdown
 ## SSH
 
-` ` `sh title:"SSH to a host"
+```sh title:"SSH to a host"
 ssh $user@<host> -p $port
-` ` `
 ```
+````
 
 The user is prompted for `user`, `host`, and `port` in order. Strict defaults
 are kept so existing cheats stay backwards compatible.
@@ -123,16 +123,16 @@ var container = docker ps --format "{{.Names}}" --- --header "Select container"
 
 Import them elsewhere:
 
-```markdown
+````markdown
 ## Docker: view logs
 
-` ` `sh title:"Follow container logs"
+```sh title:"Follow container logs"
 docker logs -f $container
-` ` `
+```
 <!-- cheat
 import docker_container
 -->
-```
+````
 
 ## Configuration
 
@@ -235,7 +235,7 @@ Cheats are searchable by tag. Tags can come from five places: the folder/file
 path, YAML front matter, a hashtag or YAML block at the end of the file, an
 inline `#tag` in prose under a cheat, or the heading itself.
 
-```markdown
+````markdown
 ---
 tags: [aws, cloud]
 ---
@@ -246,13 +246,13 @@ tags: [aws, cloud]
 
 #s3
 
-\`\`\`sh title:"List S3 buckets"
+```sh title:"List S3 buckets"
 aws s3 ls
-\`\`\`
+```
 
 ---
 #quickref #production
-```
+````
 
 Tags are merged, lowercased, and folded into the regular search index; type any
 of them in the picker. Full details: [docs/tags.md](docs/tags.md).
