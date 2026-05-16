@@ -12,6 +12,9 @@ type Cheat struct {
 	Header        string            // Section header
 	Description   string            // Description text
 	Command       string            // Shell command template
+	CommandLang   string            // Code fence language for Command
+	CommandStart  int               // 1-indexed source line of first command line
+	CommandEnd    int               // 1-indexed source line of last command line
 	Tags          []string          // Tags from path/header
 	Export        string            // Module name if exported
 	Imports       []string          // Imported modules

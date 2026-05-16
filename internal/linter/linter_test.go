@@ -52,7 +52,7 @@ func TestLintAcceptsContinuedVarShellPipelines(t *testing.T) {
 
 <!-- cheat
 export domain
-var domain = printf '%s\n' '$op_engagement_domain' "$(grep -v '^[[:space:]]*#' /etc/hosts \
+var domain = printf '%s\n' '$domain' "$(grep -v '^[[:space:]]*#' /etc/hosts \
   | sed -E 's/^[[:space:]]+//; s/[[:space:]]+/ /g' \
   | cut -d' ' -f2- \
   | tr ' ' '\n' \
@@ -72,23 +72,23 @@ var domain = printf '%s\n' '$op_engagement_domain' "$(grep -v '^[[:space:]]*#' /
 
 func TestLintAcceptsPromptOnlyVarWithArgs(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "netexec.md")
-	writeFile(t, path, `# NetExec
+	path := filepath.Join(dir, "deploy.md")
+	writeFile(t, path, `# Deploy
 
-## Auth
+## Sync
 
 `+"```sh"+`
-nxc smb $target $auth_flags
+rsync -a $source $dest
 `+"```"+`
 <!-- cheat
-var auth_method = printf 'hash\tUse NT hash\npassword\tUse password\nkerberos\tUse Kerberos ticket\n' --- --delimiter '\t'
+var sync_method = printf 'fast\tFast\nslow\tSlow\n' --- --delimiter '\t'
 
-if $auth_method != kerberos
-var credential --- --header "Credential"
+if $sync_method != slow
+var dest --- --header "Destination"
 fi
 
-if $auth_method == hash
-var auth_flags := -H $credential
+if $sync_method == fast
+var dest := /tmp/sync
 fi
 -->
 `)
@@ -201,17 +201,17 @@ id
 func TestLintAllowsSameHeaderTextWhenOnlyOneIsACheat(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "page_title.md")
-	writeFile(t, path, `# Responder
+	writeFile(t, path, `# Server
 
 <!-- cheat
 export interface
 var interface
 -->
 
-## Responder
+## Server
 
 `+"```sh"+`
-sudo responder -I $interface
+python3 -m http.server -b $interface
 `+"```"+`
 <!-- cheat
 import interface
@@ -373,6 +373,347 @@ export shell_helper
 	}
 }
 
+func TestLintShellSyntaxDeclarationsAndTemplateRefs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shell.md")
+	writeFile(t, path, `## Loop
+
+`+"```sh"+`
+for i in {1..10}; do echo <a>.$i; done
+`+"```"+`
+<!-- cheat
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if !hasFinding(findings, "variable \"a\" referenced") {
+		t.Fatalf("missing template ref finding\nfindings:\n%s", formatFindings(findings))
+	}
+	if hasFinding(findings, "variable \"i\" referenced") {
+		t.Fatalf("shell for variable should be syntax-declared\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
+func TestLintShellSpecialsDoNotApplyToAngleRefs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "home.md")
+	writeFile(t, path, `## Home
+
+`+"```sh"+`
+echo "$HOME" "<HOME>" "$1" "${10}"
+`+"```"+`
+<!-- cheat
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if !hasFinding(findings, "variable \"HOME\" referenced") {
+		t.Fatalf("<HOME> should warn even though $HOME is shell-special\nfindings:\n%s", formatFindings(findings))
+	}
+	if countFindings(findings, "variable \"HOME\" referenced") != 1 {
+		t.Fatalf("only <HOME> should warn, not $HOME\nfindings:\n%s", formatFindings(findings))
+	}
+	if hasFinding(findings, "variable \"1\" referenced") || hasFinding(findings, "variable \"10\" referenced") {
+		t.Fatalf("numeric shell positional params should be special\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
+func TestLintPowerShellSyntaxDeclarationsAndAutomatics(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ps.md")
+	writeFile(t, path, `## Compare
+
+`+"```powershell"+`
+while($true) {
+  $process = Get-WmiObject Win32_Process
+  $process2 = Get-WmiObject Win32_Process
+  Compare-Object $process $process2
+}
+`+"```"+`
+<!-- cheat
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	for _, name := range []string{"true", "process", "process2"} {
+		if hasFinding(findings, "variable \""+name+"\" referenced") {
+			t.Fatalf("PowerShell %s should not warn\nfindings:\n%s", name, formatFindings(findings))
+		}
+	}
+}
+
+func TestLintPowerShellWarnsForUndeclaredInputButNotAssignment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ps_input.md")
+	writeFile(t, path, `## Parse
+
+`+"```ps1"+`
+$obj = ConvertFrom-Json $input_data
+`+"```"+`
+<!-- cheat
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if !hasFinding(findings, "variable \"input_data\" referenced") {
+		t.Fatalf("missing undeclared PowerShell input finding\nfindings:\n%s", formatFindings(findings))
+	}
+	if hasFinding(findings, "variable \"obj\" referenced") {
+		t.Fatalf("assignment-declared PowerShell variable should not warn\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
+func TestLintPowerShellProviderNamespacesDoNotWarn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ps_env.md")
+	writeFile(t, path, `## AppData
+
+`+"```powershell"+`
+Get-ChildItem $env:APPDATA\MyApp\
+`+"```"+`
+<!-- cheat
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if hasFinding(findings, "variable \"env\" referenced") {
+		t.Fatalf("PowerShell provider namespace $env: should not warn\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
+func TestLintInfersPowerShellInShellFence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ps_sh.md")
+	writeFile(t, path, `## Filter
+
+`+"```sh"+`
+Get-Process | Where-Object { $_.Responding -eq $false -or $_.Name -ne $null }
+`+"```"+`
+<!-- cheat
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	for _, name := range []string{"_", "false", "null"} {
+		if hasFinding(findings, "variable \""+name+"\" referenced") {
+			t.Fatalf("PowerShell-looking sh fence should not warn for %s\nfindings:\n%s", name, formatFindings(findings))
+		}
+	}
+}
+
+func TestLintEmbeddedTclDeclarationsInShellFence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tcl.md")
+	writeFile(t, path, `## Tcl
+
+`+"```sh"+`
+tclsh
+set s value
+gets $s c
+set e $c
+`+"```"+`
+<!-- cheat
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	for _, name := range []string{"s", "c", "e"} {
+		if hasFinding(findings, "variable \""+name+"\" referenced") {
+			t.Fatalf("embedded Tcl variable %s should not warn\nfindings:\n%s", name, formatFindings(findings))
+		}
+	}
+}
+
+func TestLintEmbeddedPerlAndPHPDeclarations(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "embedded.md")
+	writeFile(t, path, `## Perl
+
+`+"```sh"+`
+perl -e '$s="$server"; my $fh = undef; $content = <$fh>; print $s;'
+perl -e 'open(my $handle, ">", "$file_out"); print $handle "ok";'
+`+"```"+`
+<!-- cheat
+var server
+var file_out
+-->
+
+## PHP
+
+`+"```sh"+`
+php -r '$p = array(); $h = proc_open("$cmd", $p, $pipes); echo $pipes[1];'
+`+"```"+`
+<!-- cheat
+var cmd
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	for _, name := range []string{"s", "fh", "content", "handle", "p", "h", "pipes"} {
+		if hasFinding(findings, "variable \""+name+"\" referenced") {
+			t.Fatalf("embedded interpreter local %s should not warn\nfindings:\n%s", name, formatFindings(findings))
+		}
+	}
+}
+
+func TestLintEmbeddedPowerShellInCmdFence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cmd_ps.md")
+	writeFile(t, path, `## Cmd PS
+
+`+"```cmd"+`
+powershell.exe -c "$e=New-Object -ComObject wscript.shell;$e.Popup('$file_out')"
+`+"```"+`
+<!-- cheat
+var file_out
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if hasFinding(findings, "variable \"e\" referenced") {
+		t.Fatalf("embedded PowerShell assignment should declare e\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
+func TestLintMethodChainsDoNotWarn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "methods.md")
+	writeFile(t, path, `## Methods
+
+`+"```powershell"+`
+$obj.Document.Application.ShellExecute("cmd.exe","/c $command","C:\Windows\System32",$null,0)
+$com.Application.ActivateMicrosoftApp("5")
+`+"```"+`
+<!-- cheat
+var command
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	for _, name := range []string{"obj", "com"} {
+		if hasFinding(findings, "variable \""+name+"\" referenced") {
+			t.Fatalf("method chain object %s should not warn\nfindings:\n%s", name, formatFindings(findings))
+		}
+	}
+}
+
+func TestLintShellSingleQuotedRegexDoesNotWarn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "grep.md")
+	writeFile(t, path, `## Regex
+
+`+"```sh"+`
+grep -e '\($_GET\|$REQUEST\)' --color
+`+"```"+`
+<!-- cheat
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	for _, name := range []string{"_GET", "REQUEST"} {
+		if hasFinding(findings, "variable \""+name+"\" referenced") {
+			t.Fatalf("single-quoted shell regex %s should not warn\nfindings:\n%s", name, formatFindings(findings))
+		}
+	}
+}
+
+func TestLintDoesNotTreatHeredocXMLTagsAsAngleRefs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "heredoc.md")
+	writeFile(t, path, `## XML
+
+`+"```sh"+`
+cat >$tmp_file <<EOF
+<domain>
+  <name>x</name>
+  <script path='$cmd_file'/>
+</domain>
+EOF
+`+"```"+`
+<!-- cheat
+var cmd_file
+var tmp_file
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	for _, name := range []string{"domain", "name", "script"} {
+		if hasFinding(findings, "variable \""+name+"\" referenced") {
+			t.Fatalf("heredoc XML tag %s should not be an angle template ref\nfindings:\n%s", name, formatFindings(findings))
+		}
+	}
+}
+
+func TestLintUnknownLanguageDollarRefsAreStrict(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unknown.md")
+	writeFile(t, path, `## Unknown
+
+`+"```python"+`
+print($HOME)
+`+"```"+`
+<!-- cheat
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if !hasFinding(findings, "variable \"HOME\" referenced") {
+		t.Fatalf("unknown-language $HOME should be strict, not shell-special\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -387,6 +728,16 @@ func hasFinding(findings []Finding, substr string) bool {
 		}
 	}
 	return false
+}
+
+func countFindings(findings []Finding, substr string) int {
+	count := 0
+	for _, f := range findings {
+		if strings.Contains(f.Message, substr) {
+			count++
+		}
+	}
+	return count
 }
 
 func formatFindings(findings []Finding) string {

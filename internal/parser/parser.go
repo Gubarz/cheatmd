@@ -9,8 +9,6 @@ import (
 	"sync"
 )
 
-
-
 // ============================================================================
 // Parser
 // ============================================================================
@@ -186,8 +184,10 @@ func (p *Parser) ParseSingleFile(path string) (*CheatIndex, error) {
 // parseState holds the current parsing state
 type parseState struct {
 	currentHeader     string
+	lineNo            int
 	inCodeBlock       bool
 	codeBlockLang     string
+	codeBlockStart    int
 	codeBlockDesc     string
 	codeBlockBuf      []byte // direct byte buffer, no Builder overhead
 	inCheatBlock      bool
@@ -203,6 +203,8 @@ type codeBlock struct {
 	lang        string
 	content     string
 	description string
+	startLine   int
+	endLine     int
 }
 
 // reset clears pending blocks and updates header
@@ -227,8 +229,10 @@ var parseStatePool = sync.Pool{
 func getParseState() *parseState {
 	s := parseStatePool.Get().(*parseState)
 	s.currentHeader = ""
+	s.lineNo = 0
 	s.inCodeBlock = false
 	s.codeBlockLang = ""
+	s.codeBlockStart = 0
 	s.codeBlockDesc = ""
 	s.codeBlockBuf = s.codeBlockBuf[:0]
 	s.inCheatBlock = false
@@ -262,9 +266,11 @@ func (p *Parser) parseLines(path string, data []byte) {
 
 	// Extract front matter and footer YAML blocks before line parsing
 	body, frontTags := extractFrontMatterTags(data)
+	lineOffset := countNewlines(data[:len(data)-len(body)])
 	body, footerTags := extractFooterTags(body)
 	state.fileTags = append(state.fileTags, frontTags...)
 	state.fileTags = append(state.fileTags, footerTags...)
+	state.lineNo = lineOffset
 
 	// Process line by line without allocating []string
 	start := 0
@@ -274,6 +280,7 @@ func (p *Parser) parseLines(path string, data []byte) {
 			if end > start && body[end-1] == '\r' {
 				end--
 			}
+			state.lineNo++
 			p.parseLine(path, body[start:end], state)
 			start = i + 1
 		}
@@ -281,6 +288,16 @@ func (p *Parser) parseLines(path string, data []byte) {
 
 	// Process remaining pending blocks
 	p.processPendingBlocks(path, state)
+}
+
+func countNewlines(b []byte) int {
+	count := 0
+	for _, c := range b {
+		if c == '\n' {
+			count++
+		}
+	}
+	return count
 }
 
 // parseLine processes a single line (as bytes, no allocation)
@@ -295,6 +312,8 @@ func (p *Parser) parseLine(path string, line []byte, s *parseState) {
 					lang:        s.codeBlockLang,
 					content:     string(content),
 					description: s.codeBlockDesc,
+					startLine:   s.codeBlockStart,
+					endLine:     s.lineNo - 1,
 				})
 			}
 			return
@@ -340,6 +359,7 @@ func (p *Parser) parseLine(path string, line []byte, s *parseState) {
 		if lang, desc, ok := parseCodeBlockStart(line); ok {
 			s.inCodeBlock = true
 			s.codeBlockLang = lang
+			s.codeBlockStart = s.lineNo + 1
 			s.codeBlockDesc = desc
 			s.codeBlockBuf = s.codeBlockBuf[:0]
 			return
@@ -373,6 +393,7 @@ func (p *Parser) parseLine(path string, line []byte, s *parseState) {
 		}
 	}
 }
+
 // processCheatComment handles single-line <!-- cheat ... --> comments
 func (p *Parser) processCheatComment(path string, s *parseState, content string) {
 	if len(s.pendingCodeBlocks) == 0 {
@@ -389,7 +410,7 @@ func (p *Parser) processCheatBlock(path string, s *parseState) {
 		p.flushLastPendingCheat(path, s, content)
 	} else {
 		// Standalone cheat block (module definition)
-		cheat := p.createCheat(path, s, "", "", content, true)
+		cheat := p.createCheat(path, s, codeBlock{}, content, true)
 		if cheat.Export != "" {
 			p.index.RegisterModule(cheat)
 		}
@@ -400,7 +421,7 @@ func (p *Parser) processCheatBlock(path string, s *parseState) {
 func (p *Parser) flushLastPendingCheat(path string, s *parseState, cheatBlock string) {
 	lastIdx := len(s.pendingCodeBlocks) - 1
 	block := s.pendingCodeBlocks[lastIdx]
-	cheat := p.createCheat(path, s, block.description, block.content, cheatBlock, true)
+	cheat := p.createCheat(path, s, block, cheatBlock, true)
 	p.index.AddCheat(cheat)
 	p.index.RegisterModule(cheat)
 	s.pendingCodeBlocks = s.pendingCodeBlocks[:lastIdx]
@@ -410,7 +431,7 @@ func (p *Parser) flushLastPendingCheat(path string, s *parseState, cheatBlock st
 func (p *Parser) processPendingBlocks(path string, s *parseState) {
 	for _, block := range s.pendingCodeBlocks {
 		if IsShellLanguage(block.lang) && block.content != "" {
-			cheat := p.createCheat(path, s, block.description, block.content, "", false)
+			cheat := p.createCheat(path, s, block, "", false)
 			p.index.AddCheat(cheat)
 		}
 	}
@@ -421,10 +442,13 @@ func (p *Parser) processPendingBlocks(path string, s *parseState) {
 // ============================================================================
 
 // createCheat creates a new cheat from parsed data
-func (p *Parser) createCheat(path string, s *parseState, description, command, cheatBlock string, hasCheatBlock bool) *Cheat {
+func (p *Parser) createCheat(path string, s *parseState, block codeBlock, cheatBlock string, hasCheatBlock bool) *Cheat {
 	cheat := NewCheat(path, s.currentHeader)
-	cheat.Description = strings.TrimSpace(description)
-	cheat.Command = command
+	cheat.Description = strings.TrimSpace(block.description)
+	cheat.Command = block.content
+	cheat.CommandLang = block.lang
+	cheat.CommandStart = block.startLine
+	cheat.CommandEnd = block.endLine
 	cheat.HasCheatBlock = hasCheatBlock
 	cheat.Tags = p.buildCheatTags(path, s)
 
@@ -435,5 +459,3 @@ func (p *Parser) createCheat(path string, s *parseState, description, command, c
 	s.headerCheats = append(s.headerCheats, cheat)
 	return cheat
 }
-
-
