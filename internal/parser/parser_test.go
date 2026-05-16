@@ -199,6 +199,31 @@ func TestParseSingleLineEmptyCheatComment(t *testing.T) {
 	}
 }
 
+func TestParseCheatCommandSourceMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "metadata.md")
+	content := "# Cheats\n\n## PowerShell\n\n```powershell title:\"Compare\"\n$obj = 1\nWrite-Host $obj\n```\n<!-- cheat -->\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewParser()
+	index, err := p.ParseSingleFile(path)
+	if err != nil {
+		t.Fatalf("ParseSingleFile() error: %v", err)
+	}
+	if len(index.Cheats) != 1 {
+		t.Fatalf("ParseSingleFile() cheats = %d, want 1", len(index.Cheats))
+	}
+	cheat := index.Cheats[0]
+	if cheat.CommandLang != "powershell" {
+		t.Fatalf("CommandLang = %q, want %q", cheat.CommandLang, "powershell")
+	}
+	if cheat.CommandStart != 6 || cheat.CommandEnd != 7 {
+		t.Fatalf("command lines = %d..%d, want 6..7", cheat.CommandStart, cheat.CommandEnd)
+	}
+}
+
 func TestParseCheatSingleLineRequiresKeywordBoundary(t *testing.T) {
 	if _, ok := parseCheatSingleLine([]byte("<!-- cheating -->")); ok {
 		t.Fatal("parseCheatSingleLine accepted non-cheat keyword")
