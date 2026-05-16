@@ -3,7 +3,7 @@ package executor
 import (
 	"testing"
 
-	"github.com/gubarz/cheatmd/internal/parser"
+	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
 // mockClipboard implements Clipboard interface for testing

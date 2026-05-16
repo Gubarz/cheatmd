@@ -6,9 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/gubarz/cheatmd/internal/config"
-	"github.com/gubarz/cheatmd/internal/history"
-	"github.com/gubarz/cheatmd/internal/parser"
+	"github.com/gubarz/cheatmd/pkg/config"
+	"github.com/gubarz/cheatmd/pkg/history"
+	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
 // historyState holds the overlay state for the execution-history picker.

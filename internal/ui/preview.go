@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
 
-	"github.com/gubarz/cheatmd/internal/config"
-	"github.com/gubarz/cheatmd/internal/parser"
+	"github.com/gubarz/cheatmd/pkg/config"
+	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
 // previewOverlayState holds the state for the markdown preview overlay.

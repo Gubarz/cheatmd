@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/gubarz/cheatmd/internal/parser"
+	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
 func TestExtractEmbeddedVars(t *testing.T) {
