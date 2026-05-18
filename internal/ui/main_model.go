@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -143,6 +144,7 @@ func newMainModel(cheats []*parser.Cheat, index *parser.CheatIndex, exec Executo
 	ti.Focus()
 	ti.CharLimit = 256
 	ti.Width = 50
+	ti.KeyMap.DeleteWordForward.SetKeys("alt+delete", "alt+d", "ctrl+delete")
 
 	items := make([]cheatItem, len(cheats))
 	for i, cheat := range cheats {
@@ -172,6 +174,11 @@ func (m *mainModel) Init() tea.Cmd {
 
 // Update implements tea.Model
 func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Normalize common raw CSI sequences for ctrl+delete that aren't parsed by bubbletea
+	if fmt.Sprint(msg) == "?CSI[51 59 53 126]?" {
+		msg = tea.KeyMsg{Type: tea.KeyDelete, Alt: true}
+	}
+
 	// Handle window size for both phases
 	if wsMsg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = max(wsMsg.Width, 1)
