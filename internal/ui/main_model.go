@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"sort"
 	"strings"
 	"sync"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gubarz/cheatmd/pkg/chainstate"
 	"github.com/gubarz/cheatmd/pkg/executor"
+	"github.com/gubarz/cheatmd/pkg/history"
 	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
@@ -95,6 +97,7 @@ type mainModel struct {
 	executor   Executor
 	chainState *chainstate.State
 	chainPath  string
+	frecency   map[string]float64
 }
 
 // varResolveState holds state for resolving variables within the unified TUI
@@ -108,6 +111,22 @@ type varResolveState struct {
 	customHeader string
 	shellErr     error // error from running shell command (if any)
 	isPromptOnly bool  // true if no options, just text input
+}
+
+func (m *mainModel) applyFrecency(scores map[string]float64) {
+	if len(scores) == 0 {
+		return
+	}
+	m.frecency = scores
+	sort.SliceStable(m.cheats, func(i, j int) bool {
+		left := scores[history.CheatKey(m.cheats[i].cheat.File, m.cheats[i].cheat.Header)]
+		right := scores[history.CheatKey(m.cheats[j].cheat.File, m.cheats[j].cheat.Header)]
+		if left == right {
+			return false
+		}
+		return left > right
+	})
+	m.filtered = m.cheats
 }
 
 // FilteredOption pairs display text with original value for variable selection

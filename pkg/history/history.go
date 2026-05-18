@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,8 @@ type Entry struct {
 	Header    string            `json:"header"`
 	Scope     map[string]string `json:"scope,omitempty"`
 }
+
+const frecencyHalfLife = 14 * 24 * time.Hour
 
 // DefaultPath returns the canonical history file path. The override is used
 // verbatim if non-empty; otherwise $XDG_DATA_HOME/cheatmd/history.jsonl is
@@ -109,6 +112,34 @@ func Load(path string, maxEntries int) ([]Entry, error) {
 		entries = entries[:maxEntries]
 	}
 	return entries, nil
+}
+
+// CheatKey returns the stable history identity for a parsed cheat. It matches
+// recorded executions by source file and section header, so command edits still
+// keep useful ranking history.
+func CheatKey(file, header string) string {
+	return file + "\x00" + header
+}
+
+// FrecencyScores aggregates execution history into zoxide-style scores:
+// repeated use increases the score while older executions decay over time.
+func FrecencyScores(entries []Entry, now time.Time) map[string]float64 {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	scores := make(map[string]float64)
+	for _, entry := range entries {
+		if entry.File == "" || entry.Header == "" {
+			continue
+		}
+		age := now.Sub(entry.Timestamp)
+		if entry.Timestamp.IsZero() || age < 0 {
+			age = 0
+		}
+		weight := math.Pow(0.5, float64(age)/float64(frecencyHalfLife))
+		scores[CheatKey(entry.File, entry.Header)] += weight
+	}
+	return scores
 }
 
 // Display renders an entry as a single line for picker display. Long commands
