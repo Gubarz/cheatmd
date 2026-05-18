@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -92,6 +93,9 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 	}
 
 	m := newMainModel(cheats, index, exec)
+	if scores := loadFrecencyScores(); len(scores) > 0 {
+		m.applyFrecency(scores)
+	}
 	m.chainPath, _ = chainstate.DefaultPath()
 	if m.chainPath != "" {
 		m.chainState, _ = chainstate.Load(m.chainPath)
@@ -180,6 +184,18 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 	return executeOutput(finalCmd, exec)
 }
 
+func loadFrecencyScores() map[string]float64 {
+	path, err := history.DefaultPath(config.GetHistoryFile())
+	if err != nil {
+		return nil
+	}
+	entries, err := history.Load(path, config.GetHistoryMax())
+	if err != nil {
+		return nil
+	}
+	return history.FrecencyScores(entries, time.Now())
+}
+
 func advanceChain(index *parser.CheatIndex, cheat *parser.Cheat, path string, state *chainstate.State) {
 	if cheat == nil || cheat.ChainName == "" || cheat.ChainStep < 1 || path == "" {
 		return
@@ -187,10 +203,10 @@ func advanceChain(index *parser.CheatIndex, cheat *parser.Cheat, path string, st
 	if state == nil {
 		state = &chainstate.State{Projects: make(map[string]*chainstate.ProjectState)}
 	}
-	
+
 	maxStep := index.ChainMaxSteps[cheat.ChainName]
 	next := cheat.ChainStep + 1
-	
+
 	if maxStep == 0 || next > maxStep {
 		next = 1
 		chainstate.SetActive(index.Root, "", state)
