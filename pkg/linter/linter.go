@@ -476,7 +476,7 @@ func joinContinuationLinesWithLineNos(lines []string, lineNos []int) ([]string, 
 // ============================================================================
 
 // lintCheatBlock validates the DSL inside one cheat block. It expects all
-// lines to be one of: `var`/`if`/`fi`/`export`/`import`, blank, or `#`-comment.
+// lines to be one of: `var`/`if`/`fi`/`export`/`import`/`chain`, blank, or `#`-comment.
 func lintCheatBlock(file string, b struct {
 	startLine int
 	lines     []string
@@ -539,6 +539,8 @@ func lintCheatBlock(file string, b struct {
 					Message:  fmt.Sprintf("`%s` name must be a single token", keyword),
 				})
 			}
+		case "chain":
+			findings = append(findings, lintChainLine(file, lineNo, rest)...)
 		case "var":
 			findings = append(findings, lintVarLine(file, lineNo, rest)...)
 		default:
@@ -546,7 +548,7 @@ func lintCheatBlock(file string, b struct {
 				File: file, Line: lineNo, Column: 1,
 				Severity: SeverityError,
 				Message: fmt.Sprintf(
-					"unknown DSL keyword %q (expected one of: var, if, fi, export, import)",
+					"unknown DSL keyword %q (expected one of: var, if, fi, export, import, chain)",
 					keyword,
 				),
 			})
@@ -561,6 +563,42 @@ func lintCheatBlock(file string, b struct {
 		})
 	}
 	return findings
+}
+
+func lintChainLine(file string, lineNo int, rest string) []Finding {
+	name, after := splitFirstWord(rest)
+	step, extra := splitFirstWord(after)
+	if name == "" || step == "" || extra != "" {
+		return []Finding{{
+			File: file, Line: lineNo, Column: 1,
+			Severity: SeverityError,
+			Message:  "`chain` requires exactly a name and positive step number",
+		}}
+	}
+	if containsWS(name) {
+		return []Finding{{
+			File: file, Line: lineNo, Column: 1,
+			Severity: SeverityError,
+			Message:  "`chain` name must be a single token",
+		}}
+	}
+	for i := 0; i < len(step); i++ {
+		if step[i] < '0' || step[i] > '9' {
+			return []Finding{{
+				File: file, Line: lineNo, Column: 1,
+				Severity: SeverityError,
+				Message:  "`chain` step must be a positive number",
+			}}
+		}
+	}
+	if step == "0" {
+		return []Finding{{
+			File: file, Line: lineNo, Column: 1,
+			Severity: SeverityError,
+			Message:  "`chain` step must be a positive number",
+		}}
+	}
+	return nil
 }
 
 func lintVarLine(file string, lineNo int, rest string) []Finding {
@@ -686,8 +724,30 @@ func lintIndex(path string, isDir bool) ([]Finding, error) {
 			Message:  fmt.Sprintf("duplicate export %q (also exported in %s)", dup.Name, dup.File1),
 		})
 	}
+	seenChainSteps := make(map[string]*parser.Cheat)
+	chainSteps := make(map[string]map[int]*parser.Cheat)
 
 	for _, c := range index.Cheats {
+		if c.ChainName != "" {
+			if chainSteps[c.ChainName] == nil {
+				chainSteps[c.ChainName] = make(map[int]*parser.Cheat)
+			}
+			chainSteps[c.ChainName][c.ChainStep] = c
+			key := fmt.Sprintf("%s:%d", c.ChainName, c.ChainStep)
+			if existing := seenChainSteps[key]; existing != nil {
+				line, col := findDSLRef(c.File, "chain", c.ChainName)
+				findings = append(findings, Finding{
+					File:     c.File,
+					Line:     line,
+					Column:   col,
+					Severity: SeverityError,
+					Message:  fmt.Sprintf("duplicate chain step %q %d (also in %s)", c.ChainName, c.ChainStep, existing.File),
+				})
+			} else {
+				seenChainSteps[key] = c
+			}
+		}
+
 		// Missing imports.
 		for _, imp := range c.Imports {
 			if _, ok := index.Modules[imp]; !ok {
@@ -723,6 +783,36 @@ func lintIndex(path string, isDir bool) ([]Finding, error) {
 					),
 				})
 			}
+		}
+	}
+	for name, steps := range chainSteps {
+		maxStep := 0
+		var first *parser.Cheat
+		for step, cheat := range steps {
+			if first == nil || step < first.ChainStep {
+				first = cheat
+			}
+			if step > maxStep {
+				maxStep = step
+			}
+		}
+		for step := 1; step <= maxStep; step++ {
+			if steps[step] != nil {
+				continue
+			}
+			line, col := 0, 0
+			file := ""
+			if first != nil {
+				file = first.File
+				line, col = findDSLRef(first.File, "chain", name)
+			}
+			findings = append(findings, Finding{
+				File:     file,
+				Line:     line,
+				Column:   col,
+				Severity: SeverityWarning,
+				Message:  fmt.Sprintf("chain %q is missing step %d", name, step),
+			})
 		}
 	}
 	return findings, nil
@@ -873,11 +963,11 @@ func isVarChar(c byte, first bool) bool {
 func referencedVars(c *parser.Cheat) []Ref {
 	var refs []Ref
 	seen := make(map[string]bool)
-	
+
 	cmd := c.Command
 	kind := dollarRefKind(c.CommandLang)
 	lang := lintLanguage(c.CommandLang)
-	
+
 	heredocBodyLines := heredocAngleSuppression(cmd)
 	lines := strings.Split(cmd, "\n")
 	for i, line := range lines {

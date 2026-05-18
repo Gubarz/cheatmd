@@ -227,6 +227,10 @@ func (m *mainModel) updateVarResolve(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleShellResult(msg)
 	}
 
+	if m.varState == nil {
+		return m, nil
+	}
+
 	prevQuery := m.textInput.Value()
 	var tiCmd tea.Cmd
 	m.textInput, tiCmd = m.textInput.Update(msg)
@@ -363,6 +367,7 @@ func (m *mainModel) handleVarResolveKey(msg tea.KeyMsg) tea.Cmd {
 		m.selected = nil
 		m.textInput.SetValue(m.lastQuery)
 		m.textInput.Placeholder = "Type to search..."
+		m.filterCheats()
 		m.cursor = 0
 		m.offset = 0
 		return nil

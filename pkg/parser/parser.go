@@ -29,6 +29,7 @@ func NewParser() *Parser {
 
 // ParseDirectory recursively parses all markdown files in a directory
 func (p *Parser) ParseDirectory(dir string) (*CheatIndex, error) {
+	p.index.Root = dir
 	files, err := collectMarkdownFiles(dir)
 	if err != nil {
 		return nil, err
@@ -151,10 +152,19 @@ func (p *Parser) mergeResults(results []parseResult) {
 		}
 	}
 	p.index.Cheats = totalCheats
+	for _, c := range totalCheats {
+		if c.ChainName != "" && c.ChainStep > p.index.ChainMaxSteps[c.ChainName] {
+			if p.index.ChainMaxSteps == nil {
+				p.index.ChainMaxSteps = make(map[string]int)
+			}
+			p.index.ChainMaxSteps[c.ChainName] = c.ChainStep
+		}
+	}
 }
 
 // ParseSingleFile parses a single markdown file
 func (p *Parser) ParseSingleFile(path string) (*CheatIndex, error) {
+	p.index.Root = path
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

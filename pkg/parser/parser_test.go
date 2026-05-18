@@ -142,6 +142,17 @@ func TestParseCheatDSL_ExportImport(t *testing.T) {
 	}
 }
 
+func TestParseCheatDSL_Chain(t *testing.T) {
+	dslBlock := "chain privesc 2"
+
+	cheat := &Cheat{}
+	parseCheatDSL(cheat, dslBlock)
+
+	if cheat.ChainName != "privesc" || cheat.ChainStep != 2 {
+		t.Fatalf("chain = %q %d, want privesc 2", cheat.ChainName, cheat.ChainStep)
+	}
+}
+
 func TestParseCheatDSL_Comments(t *testing.T) {
 	dslBlock := "# this is a comment\nvar host = echo localhost"
 

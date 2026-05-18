@@ -1,10 +1,13 @@
 package parser
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // parseCheatDSL parses the DSL content within a cheat block.
 //
-// Hand-rolled dispatch on the first keyword (var / if / fi / export / import)
+// Hand-rolled dispatch on the first keyword (var / if / fi / export / import / chain)
 // avoids per-line regex matching. Each non-comment, non-blank line is matched
 // against at most one branch.
 func parseCheatDSL(cheat *Cheat, content string) {
@@ -36,10 +39,26 @@ func parseCheatDSL(cheat *Cheat, content string) {
 			if rest != "" && !containsWhitespace(rest) {
 				cheat.Imports = append(cheat.Imports, rest)
 			}
+		case "chain":
+			parseChainLine(cheat, rest)
 		case "var":
 			parseVarLine(cheat, rest, currentCondition)
 		}
 	}
+}
+
+func parseChainLine(cheat *Cheat, rest string) {
+	name, after := splitFirstWord(rest)
+	stepText, extra := splitFirstWord(after)
+	if name == "" || stepText == "" || extra != "" {
+		return
+	}
+	step, err := strconv.Atoi(stepText)
+	if err != nil || step < 1 {
+		return
+	}
+	cheat.ChainName = name
+	cheat.ChainStep = step
 }
 
 // parseVarLine handles the three var declaration forms:
