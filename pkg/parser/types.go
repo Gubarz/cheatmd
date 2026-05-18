@@ -18,6 +18,8 @@ type Cheat struct {
 	Tags          []string          // Tags from path/header
 	Export        string            // Module name if exported
 	Imports       []string          // Imported modules
+	ChainName     string            // Chain group name, when this cheat is a chain step
+	ChainStep     int               // 1-indexed chain step number
 	Vars          []VarDef          // Variable definitions
 	Scope         map[string]string // Resolved values at runtime
 	HasCheatBlock bool              // Whether this cheat has a <!-- cheat --> block
@@ -112,19 +114,29 @@ type DuplicateExport struct {
 
 // CheatIndex holds all parsed cheats and modules.
 type CheatIndex struct {
-	Cheats     []*Cheat
-	Modules    map[string]*Module
-	Duplicates []DuplicateExport
+	Cheats        []*Cheat
+	Modules       map[string]*Module
+	Duplicates    []DuplicateExport
+	Root          string
+	ChainMaxSteps map[string]int
 }
 
 // NewCheatIndex creates an empty cheat index.
 func NewCheatIndex() *CheatIndex {
-	return &CheatIndex{}
+	return &CheatIndex{
+		ChainMaxSteps: make(map[string]int),
+	}
 }
 
 // AddCheat adds a cheat to the index.
 func (idx *CheatIndex) AddCheat(cheat *Cheat) {
 	idx.Cheats = append(idx.Cheats, cheat)
+	if cheat.ChainName != "" && cheat.ChainStep > idx.ChainMaxSteps[cheat.ChainName] {
+		if idx.ChainMaxSteps == nil {
+			idx.ChainMaxSteps = make(map[string]int)
+		}
+		idx.ChainMaxSteps[cheat.ChainName] = cheat.ChainStep
+	}
 }
 
 // RegisterModule registers a module from a cheat with an export. Duplicate

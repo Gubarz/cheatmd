@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/gubarz/cheatmd/pkg/chainstate"
 	"github.com/gubarz/cheatmd/pkg/config"
 	"github.com/gubarz/cheatmd/pkg/history"
 	"github.com/gubarz/cheatmd/pkg/parser"
@@ -91,6 +92,17 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 	}
 
 	m := newMainModel(cheats, index, exec)
+	m.chainPath, _ = chainstate.DefaultPath()
+	if m.chainPath != "" {
+		m.chainState, _ = chainstate.Load(m.chainPath)
+	}
+	resumeChain := false
+	if initialQuery == "" && matchCmd == "" && startPhase == phaseCheatSelect {
+		if active := chainstate.ActiveName(index.Root, m.chainState); active != "" {
+			initialQuery = "/chain " + active
+			resumeChain = true
+		}
+	}
 
 	if matchCmd != "" {
 		if matched := findMatchingCheat(cheats, matchCmd); matched != nil {
@@ -102,6 +114,7 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 			if m.phase != phaseVarResolve {
 				finalCmd := exec.BuildFinalCommand(m.selected)
 				recordRun(m.selected, finalCmd)
+				advanceChain(index, m.selected, m.chainPath, m.chainState)
 				return executeOutput(finalCmd, exec)
 			}
 
@@ -121,13 +134,14 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 		m.textInput.SetValue(initialQuery)
 		m.filterCheats()
 
-		if autoSelect && len(m.filtered) == 1 {
+		if (autoSelect || resumeChain) && len(m.filtered) == 1 {
 			m.selected = m.filtered[0].cheat
 			m.startVarResolutionInternal()
 
 			if m.phase != phaseVarResolve {
 				finalCmd := exec.BuildFinalCommand(m.selected)
 				recordRun(m.selected, finalCmd)
+				advanceChain(index, m.selected, m.chainPath, m.chainState)
 				return executeOutput(finalCmd, exec)
 			}
 		}
@@ -162,7 +176,29 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 
 	finalCmd := exec.BuildFinalCommand(result.selected)
 	recordRun(result.selected, finalCmd)
+	advanceChain(index, result.selected, result.chainPath, result.chainState)
 	return executeOutput(finalCmd, exec)
+}
+
+func advanceChain(index *parser.CheatIndex, cheat *parser.Cheat, path string, state *chainstate.State) {
+	if cheat == nil || cheat.ChainName == "" || cheat.ChainStep < 1 || path == "" {
+		return
+	}
+	if state == nil {
+		state = &chainstate.State{Projects: make(map[string]*chainstate.ProjectState)}
+	}
+	
+	maxStep := index.ChainMaxSteps[cheat.ChainName]
+	next := cheat.ChainStep + 1
+	
+	if maxStep == 0 || next > maxStep {
+		next = 1
+		chainstate.SetActive(index.Root, "", state)
+	} else {
+		chainstate.SetActive(index.Root, cheat.ChainName, state)
+	}
+	chainstate.SetStep(index.Root, cheat.ChainName, next, state)
+	_ = chainstate.Save(path, state)
 }
 
 // filterCheatsByConfig returns cheats matching configuration. When

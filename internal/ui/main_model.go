@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/gubarz/cheatmd/pkg/chainstate"
 	"github.com/gubarz/cheatmd/pkg/executor"
 	"github.com/gubarz/cheatmd/pkg/parser"
 )
@@ -70,6 +71,7 @@ type mainModel struct {
 	// Cheat selection state
 	cheats    []cheatItem
 	filtered  []cheatItem
+	chains    []chainGroup
 	cursor    int
 	offset    int // viewport scroll offset
 	selected  *parser.Cheat
@@ -91,7 +93,10 @@ type mainModel struct {
 	// Dependencies for variable resolution
 	cheatIndex *parser.CheatIndex
 	executor   Executor
+	chainState *chainstate.State
+	chainPath  string
 }
+
 // varResolveState holds state for resolving variables within the unified TUI
 type varResolveState struct {
 	cheat        *parser.Cheat
@@ -128,6 +133,7 @@ func newMainModel(cheats []*parser.Cheat, index *parser.CheatIndex, exec Executo
 	return mainModel{
 		cheats:     items,
 		filtered:   items,
+		chains:     buildChains(cheats),
 		textInput:  ti,
 		columns:    loadColumnConfig(),
 		phase:      phaseCheatSelect,
@@ -169,7 +175,6 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-
 // View implements tea.Model
 func (m *mainModel) View() string {
 	if m.quitting && m.selected == nil {
@@ -190,4 +195,3 @@ func (m *mainModel) View() string {
 		return m.renderCheatSelect()
 	}
 }
-

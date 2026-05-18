@@ -3,12 +3,15 @@ package ui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/gubarz/cheatmd/pkg/chainstate"
 	"github.com/gubarz/cheatmd/pkg/config"
 	"github.com/gubarz/cheatmd/pkg/parser"
 )
@@ -19,9 +22,12 @@ import (
 
 // cheatItem wraps a Cheat with display metadata.
 type cheatItem struct {
-	cheat  *parser.Cheat
-	folder string
-	file   string
+	cheat      *parser.Cheat
+	folder     string
+	file       string
+	chainName  string
+	chainStep  int
+	chainTotal int
 }
 
 func newCheatItem(cheat *parser.Cheat) cheatItem {
@@ -33,6 +39,41 @@ func newCheatItem(cheat *parser.Cheat) cheatItem {
 		folder: folder,
 		file:   file,
 	}
+}
+
+type chainGroup struct {
+	Name  string
+	Steps []*parser.Cheat
+}
+
+func buildChains(cheats []*parser.Cheat) []chainGroup {
+	byName := make(map[string][]*parser.Cheat)
+	for _, cheat := range cheats {
+		if cheat.ChainName == "" || cheat.ChainStep < 1 {
+			continue
+		}
+		byName[cheat.ChainName] = append(byName[cheat.ChainName], cheat)
+	}
+	chains := make([]chainGroup, 0, len(byName))
+	for name, steps := range byName {
+		sort.SliceStable(steps, func(i, j int) bool {
+			if steps[i].ChainStep != steps[j].ChainStep {
+				return steps[i].ChainStep < steps[j].ChainStep
+			}
+			return steps[i].Header < steps[j].Header
+		})
+		chains = append(chains, chainGroup{Name: name, Steps: steps})
+	}
+	sort.Slice(chains, func(i, j int) bool { return chains[i].Name < chains[j].Name })
+	return chains
+}
+
+func newChainItem(chain chainGroup, cheat *parser.Cheat) cheatItem {
+	item := newCheatItem(cheat)
+	item.chainName = chain.Name
+	item.chainStep = cheat.ChainStep
+	item.chainTotal = len(chain.Steps)
+	return item
 }
 
 // matchesQuery reports whether the cheat item matches all search words.
@@ -191,7 +232,8 @@ func (m *mainModel) handleCheatSelectKey(msg tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 	case "enter":
 		if m.cursor < len(m.filtered) {
-			m.selected = m.filtered[m.cursor].cheat
+			item := m.filtered[m.cursor]
+			m.selected = item.cheat
 			return m.startVarResolution()
 		}
 	case "up", "ctrl+p":
@@ -233,14 +275,26 @@ func (m *mainModel) moveCursor(delta int) {
 	m.cursor = clamp(m.cursor, 0, max(0, len(m.filtered)-1))
 }
 
-
-
 // filterCheats filters the cheat list based on the search query.
 func (m *mainModel) filterCheats() {
 	query := strings.TrimSpace(m.textInput.Value())
 
 	if query == "" {
 		m.filtered = m.cheats
+	} else if chainQuery, ok := parseChainQuery(query); ok {
+		words := strings.Fields(strings.ToLower(chainQuery))
+		m.filtered = make([]cheatItem, 0, min(len(m.chains), 1000))
+		for _, chain := range m.chains {
+			if !chainMatchesQuery(chain, words) {
+				continue
+			}
+			if cheat := m.nextChainStep(chain); cheat != nil {
+				m.filtered = append(m.filtered, newChainItem(chain, cheat))
+				if len(m.filtered) >= 1000 {
+					break
+				}
+			}
+		}
 	} else {
 		words := strings.Fields(strings.ToLower(query))
 		m.filtered = make([]cheatItem, 0, min(len(m.cheats), 1000))
@@ -255,6 +309,46 @@ func (m *mainModel) filterCheats() {
 	}
 
 	m.cursor = clamp(m.cursor, 0, max(0, len(m.filtered)-1))
+}
+
+func parseChainQuery(query string) (string, bool) {
+	if query == "/chain" {
+		return "", true
+	}
+	if strings.HasPrefix(query, "/chain ") {
+		return strings.TrimSpace(strings.TrimPrefix(query, "/chain ")), true
+	}
+	return "", false
+}
+
+func chainMatchesQuery(chain chainGroup, words []string) bool {
+	if len(words) == 0 {
+		return true
+	}
+	hay := strings.ToLower(chain.Name)
+	for _, step := range chain.Steps {
+		hay += " " + strings.ToLower(step.Header)
+		hay += " " + strings.ToLower(step.Description)
+	}
+	return matchesAllWords(hay, words)
+}
+
+func (m *mainModel) nextChainStep(chain chainGroup) *parser.Cheat {
+	if len(chain.Steps) == 0 {
+		return nil
+	}
+	next := 1
+	if m.chainState != nil {
+		if stored := chainstate.GetStep(m.cheatIndex.Root, chain.Name, m.chainState); stored > 0 {
+			next = stored
+		}
+	}
+	for _, step := range chain.Steps {
+		if step.ChainStep >= next {
+			return step
+		}
+	}
+	return chain.Steps[0]
 }
 
 // ============================================================================
@@ -370,6 +464,9 @@ func (m *mainModel) renderListItem(item cheatItem, selected bool, gap string) st
 
 	pathPart := buildPathDisplay(item.folder, item.file)
 	headerPart := item.cheat.Header
+	if item.chainName != "" {
+		headerPart = "/chain " + item.chainName + " " + strconv.Itoa(item.chainStep) + "/" + strconv.Itoa(item.chainTotal) + " " + headerPart
+	}
 	headerRendered := m.renderHeaderColumn(pathPart, headerPart, pStyle, hStyle, selected)
 
 	desc := truncateString(firstLine(item.cheat.Description), m.columns.descWidth)

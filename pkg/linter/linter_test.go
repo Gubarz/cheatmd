@@ -140,6 +140,86 @@ func TestLintReportsDuplicateExportsAndSingleLineSyntax(t *testing.T) {
 	}
 }
 
+func TestLintAcceptsChainAndReportsDuplicateSteps(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "one.md"), `## Step one
+
+`+"```sh"+`
+echo one
+`+"```"+`
+<!-- cheat
+chain demo 1
+-->
+`)
+	writeFile(t, filepath.Join(dir, "two.md"), `## Step one duplicate
+
+`+"```sh"+`
+echo dup
+`+"```"+`
+<!-- cheat
+chain demo 1
+-->
+`)
+
+	findings, err := Lint(dir)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if hasFinding(findings, "unknown DSL keyword \"chain\"") {
+		t.Fatalf("chain should be a valid DSL keyword\nfindings:\n%s", formatFindings(findings))
+	}
+	if !hasFinding(findings, "duplicate chain step \"demo\" 1") {
+		t.Fatalf("missing duplicate chain step finding\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
+func TestLintReportsInvalidChainLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad_chain.md")
+	writeFile(t, path, `## Bad
+
+`+"```sh"+`
+echo bad
+`+"```"+`
+<!-- cheat
+chain demo nope
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if !hasFinding(findings, "`chain` step must be a positive number") {
+		t.Fatalf("missing invalid chain step finding\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
+func TestLintReportsChainGaps(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gap.md")
+	writeFile(t, path, `## Later
+
+`+"```sh"+`
+echo later
+`+"```"+`
+<!-- cheat
+chain demo 2
+-->
+`)
+
+	findings, err := Lint(path)
+	if err != nil {
+		t.Fatalf("Lint returned error: %v", err)
+	}
+
+	if !hasFinding(findings, "chain \"demo\" is missing step 1") {
+		t.Fatalf("missing chain gap finding\nfindings:\n%s", formatFindings(findings))
+	}
+}
+
 func TestLintReportsStructuralWarnings(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "structural.md")
