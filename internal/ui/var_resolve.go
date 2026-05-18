@@ -235,8 +235,11 @@ func (m *mainModel) updateVarResolve(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var tiCmd tea.Cmd
 	m.textInput, tiCmd = m.textInput.Update(msg)
 
-	if m.textInput.Value() != prevQuery && !m.varState.isPromptOnly {
-		m.filterVarOptions()
+	if m.textInput.Value() != prevQuery {
+		m.clearPathCompletions()
+		if !m.varState.isPromptOnly {
+			m.filterVarOptions()
+		}
 	}
 
 	return m, tiCmd
@@ -390,6 +393,9 @@ func (m *mainModel) handleVarResolveKey(msg tea.KeyMsg) tea.Cmd {
 			m.moveVarCursor(10)
 		}
 	case "tab":
+		if m.completePathFromInput() {
+			return nil
+		}
 		if !m.varState.isPromptOnly && m.cursor < len(m.varState.filtered) {
 			m.textInput.SetValue(m.varState.filtered[m.cursor].Display)
 		}
@@ -413,6 +419,58 @@ func (m *mainModel) handleVarResolveKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func (m *mainModel) completePathFromInput() bool {
+	if m.varState == nil {
+		return false
+	}
+	value := m.textInput.Value()
+	cursor := m.textInput.Position()
+	if !m.varState.isPromptOnly && !looksPathLikeInput(value, cursor) {
+		return false
+	}
+	result, ok := completePathValue(value, cursor)
+	if !ok {
+		m.clearPathCompletions()
+		return false
+	}
+
+	m.textInput.SetValue(result.Value)
+	m.textInput.SetCursor(result.Cursor)
+
+	show := len(result.Candidates) > 1
+	m.varState.pathCompletions = result.Candidates
+	m.varState.showPathCompletions = show
+	m.cursor = 0
+	m.offset = 0
+	if !m.varState.isPromptOnly {
+		m.filterVarOptions()
+	}
+	return true
+}
+
+func looksPathLikeInput(value string, cursor int) bool {
+	runes := []rune(value)
+	if cursor < 0 || cursor > len(runes) {
+		cursor = len(runes)
+	}
+	start := pathTokenStart(runes, cursor)
+	token := strings.TrimLeft(string(runes[start:cursor]), `"'`)
+	return strings.HasPrefix(token, "/") ||
+		strings.HasPrefix(token, "./") ||
+		strings.HasPrefix(token, "../") ||
+		strings.HasPrefix(token, "~/") ||
+		strings.HasPrefix(token, "$") ||
+		strings.Contains(token, "/")
+}
+
+func (m *mainModel) clearPathCompletions() {
+	if m.varState == nil {
+		return
+	}
+	m.varState.pathCompletions = nil
+	m.varState.showPathCompletions = false
 }
 
 // moveVarCursor moves the cursor during variable selection.
@@ -447,6 +505,7 @@ func (m *mainModel) acceptVarValue() tea.Cmd {
 	m.varState.currentIdx++
 
 	m.textInput.SetValue("")
+	m.clearPathCompletions()
 	m.cursor = 0
 	m.offset = 0
 
@@ -499,7 +558,16 @@ func (m *mainModel) renderVarBottomWithHeight(width int, maxHeight int) string {
 	// Fixed lines: top divider(1) + bottom divider(1) + info line(1) + input(1) = 4
 	fixedLines := 4
 
-	if !m.varState.isPromptOnly && len(m.varState.filtered) > 0 {
+	if m.varState.showPathCompletions && len(m.varState.pathCompletions) > 0 {
+		availableForList := max(maxHeight-fixedLines, 1)
+		listHeight := min(availableForList, min(10, len(m.varState.pathCompletions)))
+		for i := 0; i < listHeight; i++ {
+			candidate := m.varState.pathCompletions[i]
+			b.WriteString("  ")
+			b.WriteString(styles.Command.Render(candidate.Display))
+			b.WriteString("\n")
+		}
+	} else if !m.varState.isPromptOnly && len(m.varState.filtered) > 0 {
 		availableForList := max(maxHeight-fixedLines, 1)
 		listHeight := min(availableForList, min(10, len(m.varState.filtered)))
 		start, end := scrollWindow(m.cursor, len(m.varState.filtered), listHeight, &m.offset)
@@ -520,7 +588,10 @@ func (m *mainModel) renderVarBottomWithHeight(width int, maxHeight int) string {
 	b.WriteString(styles.Divider.Render(strings.Repeat("─", width)))
 	b.WriteString("\n")
 
-	if !m.varState.isPromptOnly && len(m.varState.filtered) > 0 {
+	if m.varState.showPathCompletions && len(m.varState.pathCompletions) > 0 {
+		b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d path matches", len(m.varState.pathCompletions))))
+		b.WriteString(" • ")
+	} else if !m.varState.isPromptOnly && len(m.varState.filtered) > 0 {
 		b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d options", len(m.varState.filtered))))
 		b.WriteString(" • ")
 	}
