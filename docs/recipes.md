@@ -139,7 +139,7 @@ The picker for `$container` runs once per cheat selection.
 
 ---
 
-## File picker
+## Fast path entry with Tab completion
 
 ```markdown
 ## tar: extract
@@ -153,6 +153,17 @@ var file = find . -maxdepth 1 \( -name "*.tar*" -o -name "*.tgz" \) 2>/dev/null 
 var dest = echo "." --- --header "Destination"
 -->
 ```
+
+When `$file` or `$dest` is being resolved, type a path prefix and press `Tab`:
+
+```text
+./ar<Tab>        -> ./archive.tar.gz
+/tm<Tab>         -> /tmp/
+$HOME/Down<Tab>  -> $HOME/Downloads/
+```
+
+If there are several matches, cheatmd expands to the shared prefix and shows
+the possible completions inline. Spaces are escaped automatically.
 
 ---
 
@@ -200,3 +211,64 @@ var bucket = aws s3 ls --- --map "awk '{print \$3}'" --header "Bucket"
 
 `aws s3 ls` outputs `2024-01-15 12:00:00 my-bucket` per line. `--map "awk
 '{print $3}'"` returns just the name.
+
+---
+
+## Chain: multi-step workflow
+
+Use chains when a workflow should advance one cheat at a time across separate
+cheatmd launches.
+
+```markdown
+## Release: choose version
+
+\`\`\`sh title:"Show release version"
+echo $version
+\`\`\`
+<!-- cheat
+chain release 1
+var version --- --header "Version"
+-->
+
+## Release: build
+
+\`\`\`sh title:"Build release artifact"
+make build VERSION=$version
+\`\`\`
+<!-- cheat
+chain release 2
+var version --- --header "Version"
+-->
+
+## Release: publish
+
+\`\`\`sh title:"Publish release artifact"
+make publish VERSION=$version
+\`\`\`
+<!-- cheat
+chain release 3
+var version --- --header "Version"
+-->
+```
+
+Run `/chain release` in the picker. Step 1 runs and exits; the next plain
+`cheatmd` launch resumes at step 2. Reset progress with:
+
+```bash
+cheatmd chain reset release
+```
+
+---
+
+## Dump metadata for tools
+
+Use `dump` when you want to feed cheats into another index, search tool, or
+reporting script.
+
+```bash
+cheatmd dump ~/cheats --json
+cheatmd dump ~/cheats --csv
+```
+
+Each entry includes filename, tags, title, description, command, chain fields,
+and defined variables.

@@ -5,6 +5,7 @@ block. Every line inside the block is one of:
 
 - a **variable definition**
 - an `import` / `export` statement
+- a `chain` statement
 - an `if` / `fi` conditional
 - a comment (line starting with `#`)
 - blank
@@ -134,6 +135,33 @@ var lower  = printf 'A\nB\nC' --- --map "tr '[:upper:]' '[:lower:]'"
 
 ---
 
+## Path completion while resolving variables
+
+When a variable prompt is open, `Tab` completes paths inline. This works for
+prompt-only vars and while filtering shell-generated choices.
+
+```text
+/us<Tab>               -> /usr/
+/usr/sh<Tab>           -> /usr/share/
+/var/lo<Tab>           -> /var/log/
+$PROJECT_DIR/do<Tab>   -> $PROJECT_DIR/docs/
+```
+
+Rules:
+
+- one match completes immediately
+- many matches complete to the longest shared prefix and show candidates
+- empty path segments list directory entries
+- directories get a trailing `/`
+- spaces and shell-sensitive characters are escaped automatically
+- environment-variable roots such as `$PROJECT_DIR/...` are preserved in the
+  typed value
+
+If the current input is not path-like, `Tab` keeps its selector behavior and
+copies the highlighted option into the prompt.
+
+---
+
 ## Modules
 
 `export` makes a `<!-- cheat -->` block reusable; `import` pulls all of its
@@ -164,6 +192,48 @@ import docker_container
 Modules can export multiple vars; the importer gets all of them. A module name
 must be unique across your cheats path. Duplicate exports are reported on
 load.
+
+---
+
+## Chains
+
+`chain <name> <step>` marks a cheat as one step in an ordered workflow:
+
+```markdown
+## Release: build
+
+` ` `sh title:"Build release artifact"
+make build VERSION=$version
+` ` `
+<!-- cheat
+chain release 1
+var version
+-->
+
+## Release: publish
+
+` ` `sh title:"Publish release artifact"
+make publish VERSION=$version
+` ` `
+<!-- cheat
+chain release 2
+var version
+-->
+```
+
+Use `/chain release` in the picker to select the next step. After step 1 runs,
+the next plain `cheatmd` launch resumes `release` at step 2. After the last
+step, the active chain is cleared and progress resets to step 1.
+
+Rules:
+
+- chain names are whitespace-delimited
+- step numbers are 1-indexed integers
+- linter warnings report missing steps, duplicate steps, and malformed chain
+  lines
+- chain state is per cheats path
+
+Reset progress with `cheatmd chain reset` or `cheatmd chain reset <name>`.
 
 ---
 
