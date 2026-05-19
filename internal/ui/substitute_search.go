@@ -154,9 +154,9 @@ func (m *mainModel) renderSubstituteSearch() string {
 			varName = m.varState.vars[m.varState.currentIdx].def.Name
 		}
 		if varName != "" {
-			extra = styles.Dim.Render("→ ") + styles.Cursor.Render("$" + varName)
+			extra = styles.Dim.Render("→ ") + styles.Cursor.Render("$"+varName)
 		}
-		
+
 		matchCount = len(m.subState.picker.Filtered)
 		for _, opt := range m.subState.picker.Filtered {
 			items = append(items, opt.Display)

@@ -58,7 +58,7 @@ func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
 	for i, match := range allMatches {
 		varStart := match[0]
 		varEnd := match[1]
-		
+
 		var varName string
 		for j := 2; j < len(match); j += 2 {
 			if match[j] != -1 {

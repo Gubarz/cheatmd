@@ -1,8 +1,8 @@
 package executor
 
 import (
-	"strings"
 	"regexp"
+	"strings"
 
 	"github.com/gubarz/cheatmd/pkg/config"
 	"github.com/gubarz/cheatmd/pkg/parser"

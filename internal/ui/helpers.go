@@ -13,7 +13,6 @@ func clamp(v, minV, maxV int) int {
 	return v
 }
 
-
 // safeTextInputWidth clamps text input width to a positive value.
 // Terminal APIs can briefly report very small/zero sizes in edge cases.
 func safeTextInputWidth(totalWidth int) int {

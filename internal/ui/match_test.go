@@ -60,7 +60,6 @@ func TestBuildMatchPattern(t *testing.T) {
 	}
 }
 
-
 func TestCheatItemMatchesQuery(t *testing.T) {
 	cheat := &parser.Cheat{
 		File:        "/cheats/networking/nmap.md",

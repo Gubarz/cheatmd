@@ -14,17 +14,17 @@ import (
 
 // Config holds the application configuration
 type Config struct {
-	Path              string `mapstructure:"path"`
-	Output            string `mapstructure:"output"`
-	Shell             string `mapstructure:"shell"`
-	Editor            string `mapstructure:"editor"`
-	PreHook           string `mapstructure:"pre_hook"`
-	PostHook          string `mapstructure:"post_hook"`
-	RequireCheatBlock   bool `mapstructure:"require_cheat_block"`
+	Path                string `mapstructure:"path"`
+	Output              string `mapstructure:"output"`
+	Shell               string `mapstructure:"shell"`
+	Editor              string `mapstructure:"editor"`
+	PreHook             string `mapstructure:"pre_hook"`
+	PostHook            string `mapstructure:"post_hook"`
+	RequireCheatBlock   bool   `mapstructure:"require_cheat_block"`
 	AllowUndeclaredVars bool   `mapstructure:"allow_undeclared_vars"`
 	VarSyntax           string `mapstructure:"var_syntax"`
-	AutoSelect          bool `mapstructure:"auto_select"`
-	AutoContinue        bool `mapstructure:"auto_continue"`
+	AutoSelect          bool   `mapstructure:"auto_select"`
+	AutoContinue        bool   `mapstructure:"auto_continue"`
 
 	// Keybindings
 	KeyWidget     string `mapstructure:"key_widget"`
@@ -78,10 +78,10 @@ type ColumnConfig struct {
 
 // Defaults for configuration
 var defaults = struct {
-	path              string
-	output            string
-	shell             string
-	editor            string
+	path                string
+	output              string
+	shell               string
+	editor              string
 	preHook             string
 	postHook            string
 	requireCheatBlock   bool
@@ -89,42 +89,42 @@ var defaults = struct {
 	varSyntax           string
 	autoSelect          bool
 	autoContinue        bool
-	keyWidget         string
-	keyOpen           string
-	keySubstitute     string
-	keyPreview        string
-	keyHistory        string
-	historyFile       string
-	historyMax        int
-	substituteSources []string
-	showFolder        bool
-	showFile          bool
-	previewHeight     int
-	colors            ColorConfig
-	columns           ColumnConfig
+	keyWidget           string
+	keyOpen             string
+	keySubstitute       string
+	keyPreview          string
+	keyHistory          string
+	historyFile         string
+	historyMax          int
+	substituteSources   []string
+	showFolder          bool
+	showFile            bool
+	previewHeight       int
+	colors              ColorConfig
+	columns             ColumnConfig
 }{
-	path:              ".",
-	output:            "print",
-	shell:             "", // Set dynamically
-	editor:            "", // Empty means use system default (xdg-open/open/start)
-	preHook:           "",
-	postHook:          "",
+	path:                ".",
+	output:              "print",
+	shell:               "", // Set dynamically
+	editor:              "", // Empty means use system default (xdg-open/open/start)
+	preHook:             "",
+	postHook:            "",
 	requireCheatBlock:   false,
 	allowUndeclaredVars: false,
 	varSyntax:           "dollar",
 	autoSelect:          false,
 	autoContinue:        false,
-	keyWidget:         "\\C-g",            // Ctrl+G for shell widgets
-	keyOpen:           "ctrl+o",           // Ctrl+O in TUI
-	keySubstitute:     "ctrl+t",           // Ctrl+T opens substitute search during var resolution
-	keyPreview:        "ctrl+y",           // Ctrl+Y opens markdown preview of current cheat's file
-	keyHistory:        "ctrl+h",           // Ctrl+H opens execution history
-	historyFile:       "",                 // Empty -> $XDG_DATA_HOME/cheatmd/history.jsonl
-	historyMax:        1000,
-	substituteSources: []string{"env", "history"},
-	showFolder:        true,
-	showFile:          true,
-	previewHeight:     6,
+	keyWidget:           "\\C-g",  // Ctrl+G for shell widgets
+	keyOpen:             "ctrl+o", // Ctrl+O in TUI
+	keySubstitute:       "ctrl+t", // Ctrl+T opens substitute search during var resolution
+	keyPreview:          "ctrl+y", // Ctrl+Y opens markdown preview of current cheat's file
+	keyHistory:          "ctrl+h", // Ctrl+H opens execution history
+	historyFile:         "",       // Empty -> $XDG_DATA_HOME/cheatmd/history.jsonl
+	historyMax:          1000,
+	substituteSources:   []string{"env", "history"},
+	showFolder:          true,
+	showFile:            true,
+	previewHeight:       6,
 	colors: ColorConfig{
 		Header:   "36",  // Cyan
 		Command:  "32",  // Green
@@ -433,8 +433,6 @@ func GetColorDim() string {
 	return viper.GetString("color_dim")
 }
 
-
-
 // ============================================================================
 // Getters - Columns
 // ============================================================================
@@ -459,8 +457,6 @@ func GetColumnCommand() int {
 	return viper.GetInt("column_command")
 }
 
-
-
 // ============================================================================
 // Setters
 // ============================================================================
@@ -470,8 +466,6 @@ func SetOutput(mode string) {
 	viper.Set("output", mode)
 	cfg.Output = mode
 }
-
-
 
 // SetAutoSelect sets auto-select mode at runtime
 func SetAutoSelect(enabled bool) {
