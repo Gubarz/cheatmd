@@ -10,6 +10,7 @@ import (
 
 	"github.com/gubarz/cheatmd/pkg/config"
 	"github.com/gubarz/cheatmd/pkg/executor"
+	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
 // ============================================================================
@@ -75,8 +76,8 @@ func (m *mainModel) startVarResolutionInternal() {
 	m.lastQuery = m.textInput.Value()
 	m.textInput.SetValue("")
 	m.textInput.Placeholder = "Type to filter or enter value..."
-	m.cursor = 0
-	m.offset = 0
+	m.picker.Cursor = 0
+	m.picker.Offset = 0
 }
 
 // prepareCurrentVar prepares the current variable for display. May return a
@@ -142,7 +143,9 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 		if vs.skipAutoCont {
 			m.varState.isPromptOnly = true
 			m.varState.options = nil
-			m.varState.filtered = nil
+			if m.varState.picker != nil {
+				m.varState.picker.SetItems(nil)
+			}
 			m.textInput.SetValue(result)
 			m.textInput.CursorEnd()
 			return nil
@@ -157,7 +160,9 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 	if strings.TrimSpace(vs.def.Shell) == "" {
 		m.varState.isPromptOnly = true
 		m.varState.options = nil
-		m.varState.filtered = nil
+		if m.varState.picker != nil {
+			m.varState.picker.SetItems(nil)
+		}
 		if vs.prefill != "" {
 			m.textInput.SetValue(vs.prefill)
 			m.textInput.CursorEnd()
@@ -172,7 +177,7 @@ func (m *mainModel) prepareCurrentVar() tea.Cmd {
 		if err != nil {
 			return shellResultMsg{nil, err}
 		}
-		lines := splitLines(output)
+		lines := parser.SplitLines(output)
 		return shellResultMsg{lines, nil}
 	}
 }
@@ -237,8 +242,8 @@ func (m *mainModel) updateVarResolve(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.textInput.Value() != prevQuery {
 		m.clearPathCompletions()
-		if !m.varState.isPromptOnly {
-			m.filterVarOptions()
+		if !m.varState.isPromptOnly && m.varState.picker != nil {
+			m.varState.picker.Filter(m.textInput.Value())
 		}
 	}
 
@@ -257,7 +262,9 @@ func (m *mainModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
 		m.varState.shellErr = msg.err
 		m.varState.isPromptOnly = true
 		m.varState.options = nil
-		m.varState.filtered = nil
+		if m.varState.picker != nil {
+			m.varState.picker.SetItems(nil)
+		}
 		m.textInput.SetValue(vs.prefill)
 		return m, nil
 	}
@@ -282,67 +289,35 @@ func (m *mainModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
 		m.textInput.CursorEnd()
 	default:
 		m.varState.isPromptOnly = false
-		m.buildVarFilteredList()
+		
+		// Build options list
+		opts := m.varState.selectOpts
+		items := make([]FilteredOption, len(msg.options))
+		for i, opt := range msg.options {
+			display := getDisplayColumn(opt, opts.Delimiter, opts.Column)
+			items[i] = FilteredOption{
+				Display:    display,
+				Original:   opt,
+				SearchText: strings.ToLower(display),
+			}
+		}
+
+		if m.varState.picker == nil {
+			m.varState.picker = NewPicker(items, func(opt FilteredOption, words []string) bool {
+				return matchesAllWords(opt.SearchText, words)
+			})
+		} else {
+			m.varState.picker.SetItems(items)
+		}
+		m.varState.picker.Filter(m.textInput.Value())
+
 		if vs.prefill != "" {
 			m.textInput.SetValue(vs.prefill)
 			m.textInput.CursorEnd()
 		}
-		m.filterVarOptions()
-		m.cursor = 0
-		m.offset = 0
 	}
 
 	return m, nil
-}
-
-// buildVarFilteredList builds the filtered list from options.
-func (m *mainModel) buildVarFilteredList() {
-	if m.varState == nil {
-		return
-	}
-
-	opts := m.varState.selectOpts
-	m.varState.filtered = make([]FilteredOption, len(m.varState.options))
-
-	for i, opt := range m.varState.options {
-		display := getDisplayColumn(opt, opts.Delimiter, opts.Column)
-		m.varState.filtered[i] = FilteredOption{
-			Display:    display,
-			Original:   opt,
-			SearchText: strings.ToLower(display),
-		}
-	}
-}
-
-// filterVarOptions filters the variable options based on search query.
-func (m *mainModel) filterVarOptions() {
-	if m.varState == nil || m.varState.isPromptOnly {
-		return
-	}
-
-	query := strings.ToLower(strings.TrimSpace(m.textInput.Value()))
-	if query == "" {
-		m.buildVarFilteredList()
-	} else {
-		words := strings.Fields(query)
-		opts := m.varState.selectOpts
-		result := make([]FilteredOption, 0, len(m.varState.options))
-
-		for _, opt := range m.varState.options {
-			display := getDisplayColumn(opt, opts.Delimiter, opts.Column)
-			searchText := strings.ToLower(display)
-			if matchesAllWords(searchText, words) {
-				result = append(result, FilteredOption{
-					Display:    display,
-					Original:   opt,
-					SearchText: searchText,
-				})
-			}
-		}
-		m.varState.filtered = result
-	}
-
-	m.cursor = clamp(m.cursor, 0, max(0, len(m.varState.filtered)-1))
 }
 
 // handleVarResolveKey processes keyboard input during variable resolution.
@@ -361,8 +336,8 @@ func (m *mainModel) handleVarResolveKey(msg tea.KeyMsg) tea.Cmd {
 			vs.value = ""
 			vs.skipAutoCont = true
 			m.textInput.SetValue("")
-			m.cursor = 0
-			m.offset = 0
+			m.picker.Cursor = 0
+			m.picker.Offset = 0
 			return m.prepareCurrentVar()
 		}
 		m.phase = phaseCheatSelect
@@ -371,33 +346,20 @@ func (m *mainModel) handleVarResolveKey(msg tea.KeyMsg) tea.Cmd {
 		m.textInput.SetValue(m.lastQuery)
 		m.textInput.Placeholder = "Type to search..."
 		m.filterCheats()
-		m.cursor = 0
-		m.offset = 0
+		m.picker.Cursor = 0
+		m.picker.Offset = 0
 		return nil
 	case "enter":
 		return m.acceptVarValue()
-	case "up", "ctrl+p":
-		if !m.varState.isPromptOnly {
-			m.moveVarCursor(-1)
-		}
-	case "down", "ctrl+n":
-		if !m.varState.isPromptOnly {
-			m.moveVarCursor(1)
-		}
-	case "pgup":
-		if !m.varState.isPromptOnly {
-			m.moveVarCursor(-10)
-		}
-	case "pgdown":
-		if !m.varState.isPromptOnly {
-			m.moveVarCursor(10)
-		}
 	case "tab":
 		if m.completePathFromInput() {
 			return nil
 		}
-		if !m.varState.isPromptOnly && m.cursor < len(m.varState.filtered) {
-			m.textInput.SetValue(m.varState.filtered[m.cursor].Display)
+		if !m.varState.isPromptOnly && m.varState.picker != nil {
+			if opt, ok := m.varState.picker.Selected(); ok {
+				m.textInput.SetValue(opt.Display)
+				m.textInput.CursorEnd()
+			}
 		}
 	default:
 		if msg.String() == config.GetKeyOpen() {
@@ -442,10 +404,8 @@ func (m *mainModel) completePathFromInput() bool {
 	show := len(result.Candidates) > 1
 	m.varState.pathCompletions = result.Candidates
 	m.varState.showPathCompletions = show
-	m.cursor = 0
-	m.offset = 0
-	if !m.varState.isPromptOnly {
-		m.filterVarOptions()
+	if !m.varState.isPromptOnly && m.varState.picker != nil {
+		m.varState.picker.Filter(m.textInput.Value())
 	}
 	return true
 }
@@ -473,15 +433,6 @@ func (m *mainModel) clearPathCompletions() {
 	m.varState.showPathCompletions = false
 }
 
-// moveVarCursor moves the cursor during variable selection.
-func (m *mainModel) moveVarCursor(delta int) {
-	if m.varState == nil {
-		return
-	}
-	m.cursor += delta
-	m.cursor = clamp(m.cursor, 0, max(0, len(m.varState.filtered)-1))
-}
-
 // acceptVarValue accepts the current value and moves to next variable.
 func (m *mainModel) acceptVarValue() tea.Cmd {
 	if m.varState == nil {
@@ -493,9 +444,16 @@ func (m *mainModel) acceptVarValue() tea.Cmd {
 
 	if m.varState.isPromptOnly {
 		value = m.textInput.Value()
-	} else if m.cursor < len(m.varState.filtered) {
-		selected := m.varState.filtered[m.cursor].Original
-		value = applyMapTransform(selected, m.varState.selectOpts)
+	} else if m.varState.picker != nil {
+		if opt, ok := m.varState.picker.Selected(); ok {
+			selected := opt.Original
+			if m.varState.selectOpts.MapCmd != "" {
+				selected = applyMapTransform(selected, m.varState.selectOpts)
+			}
+			value = selected
+		} else {
+			value = m.textInput.Value()
+		}
 	} else {
 		value = m.textInput.Value()
 	}
@@ -506,8 +464,8 @@ func (m *mainModel) acceptVarValue() tea.Cmd {
 
 	m.textInput.SetValue("")
 	m.clearPathCompletions()
-	m.cursor = 0
-	m.offset = 0
+	m.picker.Cursor = 0
+	m.picker.Offset = 0
 
 	return m.prepareCurrentVar()
 }
@@ -558,8 +516,9 @@ func (m *mainModel) renderVarBottomWithHeight(width int, maxHeight int) string {
 	// Fixed lines: top divider(1) + bottom divider(1) + info line(1) + input(1) = 4
 	fixedLines := 4
 
+	availableForList := max(maxHeight-fixedLines, 1)
+
 	if m.varState.showPathCompletions && len(m.varState.pathCompletions) > 0 {
-		availableForList := max(maxHeight-fixedLines, 1)
 		listHeight := min(availableForList, min(10, len(m.varState.pathCompletions)))
 		for i := 0; i < listHeight; i++ {
 			candidate := m.varState.pathCompletions[i]
@@ -567,14 +526,13 @@ func (m *mainModel) renderVarBottomWithHeight(width int, maxHeight int) string {
 			b.WriteString(styles.Command.Render(candidate.Display))
 			b.WriteString("\n")
 		}
-	} else if !m.varState.isPromptOnly && len(m.varState.filtered) > 0 {
-		availableForList := max(maxHeight-fixedLines, 1)
-		listHeight := min(availableForList, min(10, len(m.varState.filtered)))
-		start, end := scrollWindow(m.cursor, len(m.varState.filtered), listHeight, &m.offset)
+	} else if !m.varState.isPromptOnly && m.varState.picker != nil && len(m.varState.picker.Filtered) > 0 {
+		listHeight := min(availableForList, min(10, len(m.varState.picker.Filtered)))
+		start, end := scrollWindow(m.varState.picker.Cursor, len(m.varState.picker.Filtered), listHeight, &m.varState.picker.Offset)
 
 		for i := start; i < end; i++ {
-			opt := m.varState.filtered[i]
-			if i == m.cursor {
+			opt := m.varState.picker.Filtered[i]
+			if i == m.varState.picker.Cursor {
 				b.WriteString(styles.Cursor.Render("▶ "))
 				b.WriteString(styles.Selected.Render(styles.Command.Render(opt.Display)))
 			} else {
@@ -591,8 +549,8 @@ func (m *mainModel) renderVarBottomWithHeight(width int, maxHeight int) string {
 	if m.varState.showPathCompletions && len(m.varState.pathCompletions) > 0 {
 		b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d path matches", len(m.varState.pathCompletions))))
 		b.WriteString(" • ")
-	} else if !m.varState.isPromptOnly && len(m.varState.filtered) > 0 {
-		b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d options", len(m.varState.filtered))))
+	} else if !m.varState.isPromptOnly && m.varState.picker != nil && len(m.varState.picker.Filtered) > 0 {
+		b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d options", len(m.varState.picker.Filtered))))
 		b.WriteString(" • ")
 	}
 	b.WriteString(styles.Dim.Render("ESC back"))
@@ -616,10 +574,10 @@ func (m *mainModel) renderVarHeader(width int) string {
 	progressCmd := m.varState.cheat.Command
 	for i, vs := range m.varState.vars {
 		if vs.resolved {
-			progressCmd = replaceVar(progressCmd, vs.def.Name, styles.Header.Render(vs.value), config.GetVarSyntax())
+			progressCmd = executor.ReplaceVar(progressCmd, vs.def.Name, styles.Header.Render(vs.value), config.GetVarSyntax())
 		} else if i == m.varState.currentIdx {
 			displayStr := formatVarName(m.varState.cheat.Command, vs.def.Name)
-			progressCmd = replaceVar(progressCmd, vs.def.Name, styles.Cursor.Render(displayStr), config.GetVarSyntax())
+			progressCmd = executor.ReplaceVar(progressCmd, vs.def.Name, styles.Cursor.Render(displayStr), config.GetVarSyntax())
 		}
 	}
 	b.WriteString(progressCmd)

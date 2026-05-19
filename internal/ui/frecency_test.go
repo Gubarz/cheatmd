@@ -16,7 +16,7 @@ func TestApplyFrecencyRanksCheatPicker(t *testing.T) {
 		history.CheatKey(hot.File, hot.Header): 2,
 	})
 
-	if got := m.filtered[0].cheat.Header; got != "Hot" {
+	if got := m.picker.Filtered[0].cheat.Header; got != "Hot" {
 		t.Fatalf("top ranked cheat = %q, want Hot", got)
 	}
 }
@@ -32,7 +32,7 @@ func TestApplyFrecencyRanksFilteredResults(t *testing.T) {
 	m.textInput.SetValue("target")
 	m.filterCheats()
 
-	if got := m.filtered[0].cheat.Header; got != "Second Target" {
+	if got := m.picker.Filtered[0].cheat.Header; got != "Second Target" {
 		t.Fatalf("top filtered cheat = %q, want Second Target", got)
 	}
 }

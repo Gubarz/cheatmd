@@ -341,7 +341,7 @@ func findCheatHeaderSourceLine(raw string, cheat *parser.Cheat) int {
 			continue
 		}
 
-		if header, ok := parsePreviewHeader(trimmed); ok {
+		if header, _, ok := parser.ParseMarkdownHeader(trimmed); ok {
 			if currentHeaderLine >= 0 {
 				if line := findPendingCommandHeaderLine(pending, cheat); line >= 0 {
 					return line
@@ -362,7 +362,7 @@ func findCheatHeaderSourceLine(raw string, cheat *parser.Cheat) int {
 			continue
 		}
 
-		if content, ok := parsePreviewCheatSingleLine(trimmed); ok {
+		if content, ok := parser.ParseCheatSingleLine(trimmed); ok {
 			_ = content
 			if len(pending) > 0 {
 				last := pending[len(pending)-1]
@@ -374,7 +374,7 @@ func findCheatHeaderSourceLine(raw string, cheat *parser.Cheat) int {
 			continue
 		}
 
-		if isPreviewCheatStart(trimmed) {
+		if parser.IsCheatStart(trimmed) {
 			inCheatBlock = true
 			continue
 		}
@@ -414,46 +414,4 @@ func renderedOffsetForSourceLine(raw string, sourceLine, width int) (int, bool) 
 		offset--
 	}
 	return offset, true
-}
-
-func parsePreviewHeader(trimmed string) (string, bool) {
-	level := 0
-	for level < len(trimmed) && trimmed[level] == '#' {
-		level++
-	}
-	if level == 0 || level > 6 {
-		return "", false
-	}
-	if level == len(trimmed) {
-		return "", true
-	}
-	if trimmed[level] != ' ' && trimmed[level] != '\t' {
-		return "", false
-	}
-	return strings.TrimSpace(trimmed[level:]), true
-}
-
-func parsePreviewCheatSingleLine(trimmed string) (string, bool) {
-	if !strings.HasPrefix(trimmed, "<!--") || !strings.HasSuffix(trimmed, "-->") {
-		return "", false
-	}
-	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "<!--"), "-->"))
-	if len(inner) < len("cheat") || !strings.EqualFold(inner[:len("cheat")], "cheat") {
-		return "", false
-	}
-	if len(inner) > len("cheat") {
-		next := inner[len("cheat")]
-		if next != ' ' && next != '\t' {
-			return "", false
-		}
-	}
-	return strings.TrimSpace(inner[len("cheat"):]), true
-}
-
-func isPreviewCheatStart(trimmed string) bool {
-	if !strings.HasPrefix(trimmed, "<!--") {
-		return false
-	}
-	inner := strings.TrimSpace(strings.TrimPrefix(trimmed, "<!--"))
-	return strings.EqualFold(inner, "cheat")
 }

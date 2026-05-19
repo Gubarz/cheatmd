@@ -166,7 +166,7 @@ func inferDependentVars(cheat *parser.Cheat, index *parser.CheatIndex) {
 		return
 	}
 
-	varDefs := collectVarDefinitions(cheat, index)
+	varDefs := executor.CollectVarDefinitions(cheat, index)
 
 	changed := true
 	for changed {

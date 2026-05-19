@@ -61,6 +61,7 @@ type parseResult struct {
 	cheats     []*Cheat
 	modules    map[string]*Module
 	duplicates []DuplicateExport
+	errors     []ParseError
 }
 
 // parseFilesParallel reads and parses files using a two-stage pipeline
@@ -114,7 +115,7 @@ func parseFilesParallel(files []string) []parseResult {
 					}
 				}
 			}
-			resultChan <- parseResult{cheats: localCheats, modules: localModules, duplicates: localDuplicates}
+			resultChan <- parseResult{cheats: localCheats, modules: localModules, duplicates: localDuplicates, errors: localParser.index.Errors}
 		}(chunk)
 	}
 
@@ -137,6 +138,7 @@ func (p *Parser) mergeResults(results []parseResult) {
 		totalCheats = append(totalCheats, r.cheats...)
 		// Carry forward any duplicates detected within a single worker
 		p.index.Duplicates = append(p.index.Duplicates, r.duplicates...)
+		p.index.Errors = append(p.index.Errors, r.errors...)
 		for name, mod := range r.modules {
 			if p.index.Modules == nil {
 				p.index.Modules = make(map[string]*Module)
@@ -187,6 +189,7 @@ type parseState struct {
 	codeBlockDesc     string
 	codeBlockBuf      []byte // direct byte buffer, no Builder overhead
 	inCheatBlock      bool
+	cheatBlockStart   int
 	cheatBlockBuf     []byte
 	pendingCodeBlocks []codeBlock
 	fileTags          []string // tags from front matter + footer
@@ -232,6 +235,7 @@ func getParseState() *parseState {
 	s.codeBlockDesc = ""
 	s.codeBlockBuf = s.codeBlockBuf[:0]
 	s.inCheatBlock = false
+	s.cheatBlockStart = 0
 	s.cheatBlockBuf = s.cheatBlockBuf[:0]
 	s.pendingCodeBlocks = s.pendingCodeBlocks[:0]
 	s.fileTags = s.fileTags[:0]
@@ -280,6 +284,14 @@ func (p *Parser) parseLines(path string, data []byte) {
 			p.parseLine(path, body[start:end], state)
 			start = i + 1
 		}
+	}
+
+	if state.inCheatBlock {
+		p.index.Errors = append(p.index.Errors, ParseError{
+			File:    path,
+			Line:    state.cheatBlockStart,
+			Message: "unterminated `<!-- cheat -->` block (missing `-->`)",
+		})
 	}
 
 	// Process remaining pending blocks
@@ -340,6 +352,13 @@ func (p *Parser) parseLine(path string, line []byte, s *parseState) {
 		if header, ok := parseHeader(line); ok {
 			p.processPendingBlocks(path, s)
 			s.reset(header)
+			if header == "" {
+				p.index.Errors = append(p.index.Errors, ParseError{
+					File:    path,
+					Line:    s.lineNo,
+					Message: "empty markdown header",
+				})
+			}
 			return
 		}
 	}
@@ -366,6 +385,7 @@ func (p *Parser) parseLine(path string, line []byte, s *parseState) {
 		// Multi-line cheat block start: <!-- cheat
 		if isCheatStart(line) {
 			s.inCheatBlock = true
+			s.cheatBlockStart = s.lineNo
 			s.cheatBlockBuf = s.cheatBlockBuf[:0]
 			return
 		}
@@ -387,9 +407,20 @@ func (p *Parser) parseLine(path string, line []byte, s *parseState) {
 // processCheatComment handles single-line <!-- cheat ... --> comments
 func (p *Parser) processCheatComment(path string, s *parseState, content string) {
 	if len(s.pendingCodeBlocks) == 0 {
+		// Standalone single-line comment without a code block
+		cheat := p.createCheat(path, s, codeBlock{}, content, true, s.lineNo)
+		if cheat.Export == "" {
+			p.index.Errors = append(p.index.Errors, ParseError{
+				File:    path,
+				Line:    s.lineNo,
+				Message: "<!-- cheat --> block has no preceding code block",
+			})
+		} else {
+			p.index.RegisterModule(cheat)
+		}
 		return
 	}
-	p.flushLastPendingCheat(path, s, content)
+	p.flushLastPendingCheat(path, s, content, s.lineNo)
 }
 
 // processCheatBlock handles multi-line cheat blocks
@@ -397,21 +428,27 @@ func (p *Parser) processCheatBlock(path string, s *parseState) {
 	content := string(s.cheatBlockBuf)
 
 	if len(s.pendingCodeBlocks) > 0 {
-		p.flushLastPendingCheat(path, s, content)
+		p.flushLastPendingCheat(path, s, content, s.cheatBlockStart)
 	} else {
 		// Standalone cheat block (module definition)
-		cheat := p.createCheat(path, s, codeBlock{}, content, true)
-		if cheat.Export != "" {
+		cheat := p.createCheat(path, s, codeBlock{}, content, true, s.cheatBlockStart)
+		if cheat.Export == "" {
+			p.index.Errors = append(p.index.Errors, ParseError{
+				File:    path,
+				Line:    s.cheatBlockStart,
+				Message: "<!-- cheat --> block has no preceding code block",
+			})
+		} else {
 			p.index.RegisterModule(cheat)
 		}
 	}
 }
 
 // flushLastPendingCheat pops the last pending code block and creates a cheat from it
-func (p *Parser) flushLastPendingCheat(path string, s *parseState, cheatBlock string) {
+func (p *Parser) flushLastPendingCheat(path string, s *parseState, cheatBlock string, cheatLine int) {
 	lastIdx := len(s.pendingCodeBlocks) - 1
 	block := s.pendingCodeBlocks[lastIdx]
-	cheat := p.createCheat(path, s, block, cheatBlock, true)
+	cheat := p.createCheat(path, s, block, cheatBlock, true, cheatLine)
 	p.index.AddCheat(cheat)
 	p.index.RegisterModule(cheat)
 	s.pendingCodeBlocks = s.pendingCodeBlocks[:lastIdx]
@@ -421,7 +458,7 @@ func (p *Parser) flushLastPendingCheat(path string, s *parseState, cheatBlock st
 func (p *Parser) processPendingBlocks(path string, s *parseState) {
 	for _, block := range s.pendingCodeBlocks {
 		if IsShellLanguage(block.lang) && block.content != "" {
-			cheat := p.createCheat(path, s, block, "", false)
+			cheat := p.createCheat(path, s, block, "", false, block.startLine)
 			p.index.AddCheat(cheat)
 		}
 	}
@@ -432,7 +469,7 @@ func (p *Parser) processPendingBlocks(path string, s *parseState) {
 // ============================================================================
 
 // createCheat creates a new cheat from parsed data
-func (p *Parser) createCheat(path string, s *parseState, block codeBlock, cheatBlock string, hasCheatBlock bool) *Cheat {
+func (p *Parser) createCheat(path string, s *parseState, block codeBlock, cheatBlock string, hasCheatBlock bool, cheatLine int) *Cheat {
 	cheat := NewCheat(path, s.currentHeader)
 	cheat.Description = strings.TrimSpace(block.description)
 	cheat.Command = block.content
@@ -442,8 +479,17 @@ func (p *Parser) createCheat(path string, s *parseState, block codeBlock, cheatB
 	cheat.HasCheatBlock = hasCheatBlock
 	cheat.Tags = p.buildCheatTags(path, s)
 
+	if cheat.Header == "" && hasCheatBlock {
+		p.index.Errors = append(p.index.Errors, ParseError{
+			File:    path,
+			Line:    cheatLine,
+			Message: "cheat has no markdown header",
+		})
+	}
+
 	if cheatBlock != "" {
-		parseCheatDSL(cheat, cheatBlock)
+		errors := parseCheatDSL(cheat, cheatBlock, path, cheatLine)
+		p.index.Errors = append(p.index.Errors, errors...)
 	}
 
 	s.headerCheats = append(s.headerCheats, cheat)

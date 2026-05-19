@@ -13,10 +13,8 @@ import (
 
 // historyState holds the overlay state for the execution-history picker.
 type historyState struct {
-	entries  []history.Entry // all loaded entries, newest first
-	filtered []history.Entry
-	cursor   int
-	offset   int
+	picker *Picker[history.Entry]
+
 	// Saved cheat-select state to restore on cancel.
 	prevInput  string
 	prevCursor int
@@ -36,16 +34,16 @@ func (m *mainModel) enterHistory() bool {
 		return false
 	}
 	m.histState = &historyState{
-		entries:    entries,
-		filtered:   entries,
+		picker: NewPicker(entries, func(e history.Entry, words []string) bool {
+			hay := strings.ToLower(e.Command + " " + e.Header + " " + e.File)
+			return matchesAllWords(hay, words)
+		}),
 		prevInput:  m.textInput.Value(),
-		prevCursor: m.cursor,
-		prevOffset: m.offset,
+		prevCursor: m.picker.Cursor,
+		prevOffset: m.picker.Offset,
 	}
 	m.textInput.SetValue("")
 	m.textInput.Placeholder = "Search history..."
-	m.cursor = 0
-	m.offset = 0
 	m.phase = phaseHistory
 	return true
 }
@@ -54,8 +52,8 @@ func (m *mainModel) enterHistory() bool {
 func (m *mainModel) exitHistory() {
 	if m.histState != nil {
 		m.textInput.SetValue(m.histState.prevInput)
-		m.cursor = m.histState.prevCursor
-		m.offset = m.histState.prevOffset
+		m.picker.Cursor = m.histState.prevCursor
+		m.picker.Offset = m.histState.prevOffset
 	}
 	m.histState = nil
 	m.textInput.Placeholder = "Type to search..."
@@ -67,11 +65,15 @@ func (m *mainModel) exitHistory() {
 // resolution. If the cheat is no longer in the index (file renamed, header
 // changed) it falls back to inserting the raw command into the prompt.
 func (m *mainModel) acceptHistory() tea.Cmd {
-	if m.histState == nil || m.histState.cursor >= len(m.histState.filtered) {
+	if m.histState == nil {
 		m.exitHistory()
 		return nil
 	}
-	entry := m.histState.filtered[m.histState.cursor]
+	entry, ok := m.histState.picker.Selected()
+	if !ok {
+		m.exitHistory()
+		return nil
+	}
 	cheat := findCheatByRef(m.cheatIndex, entry.File, entry.Header)
 	if cheat == nil {
 		// Cheat no longer exists. Bail back to cheat select with the command
@@ -97,40 +99,9 @@ func (m *mainModel) acceptHistory() tea.Cmd {
 // filterHistoryEntries applies the current input as a case-insensitive AND
 // fuzzy filter over entries (command + header + file).
 func (m *mainModel) filterHistoryEntries() {
-	if m.histState == nil {
-		return
+	if m.histState != nil {
+		m.histState.picker.Filter(m.textInput.Value())
 	}
-	query := strings.ToLower(strings.TrimSpace(m.textInput.Value()))
-	if query == "" {
-		m.histState.filtered = m.histState.entries
-		m.histState.cursor = 0
-		m.histState.offset = 0
-		return
-	}
-	words := strings.Fields(query)
-	result := make([]history.Entry, 0, len(m.histState.entries))
-	for _, e := range m.histState.entries {
-		hay := strings.ToLower(e.Command + " " + e.Header + " " + e.File)
-		if matchesAllWords(hay, words) {
-			result = append(result, e)
-		}
-	}
-	m.histState.filtered = result
-	if m.histState.cursor >= len(result) {
-		m.histState.cursor = max(0, len(result)-1)
-	}
-	if m.histState.offset > m.histState.cursor {
-		m.histState.offset = m.histState.cursor
-	}
-}
-
-// moveHistoryCursor clamps the cursor; offset is reconciled at render time.
-func (m *mainModel) moveHistoryCursor(delta int) {
-	if m.histState == nil {
-		return
-	}
-	m.histState.cursor += delta
-	m.histState.cursor = clamp(m.histState.cursor, 0, max(0, len(m.histState.filtered)-1))
 }
 
 // handleHistoryKey processes keys while in phaseHistory.
@@ -145,17 +116,8 @@ func (m *mainModel) handleHistoryKey(msg tea.KeyMsg) tea.Cmd {
 		return tea.ClearScreen
 	case "enter":
 		return m.acceptHistory()
-	case "up", "ctrl+p":
-		m.moveHistoryCursor(-1)
-		return nil
-	case "down", "ctrl+n":
-		m.moveHistoryCursor(1)
-		return nil
-	case "pgup":
-		m.moveHistoryCursor(-10)
-		return nil
-	case "pgdown":
-		m.moveHistoryCursor(10)
+	}
+	if m.histState != nil && m.histState.picker.HandleKey(msg) {
 		return nil
 	}
 	return nil
@@ -192,94 +154,39 @@ func isHistoryNavKey(key string) bool {
 	return false
 }
 
-// renderHistory renders the history overlay using the same layout shape as
-// renderSubstituteSearch.
+// renderHistory renders the history overlay using the shared overlay layout.
 func (m *mainModel) renderHistory() string {
-	width := max(m.width, 80)
-	height := m.height
-	if height < 1 {
-		height = 24
-	}
-
-	inputLines := 3
-	previewHeight := 2
-	preview := m.renderHistoryPreview(width, previewHeight)
-
-	previewLines := countLines(preview)
-	listHeight := max(height-previewLines-inputLines, 1)
-	list := m.renderHistoryList(listHeight, width)
-
-	return renderWindowLayout(height, preview, list, m.renderHistoryInput(width))
-}
-
-// renderHistoryPreview is the top header: title + divider, padded to fit.
-func (m *mainModel) renderHistoryPreview(width, maxLines int) string {
-	b := getBuilder()
-	defer putBuilder(b)
-	lines := 0
-
-	if lines < maxLines {
-		b.WriteString(styles.Header.Render("History"))
-		if m.histState != nil {
-			b.WriteString("  ")
-			b.WriteString(styles.Dim.Render(fmt.Sprintf("(%d entries)", len(m.histState.entries))))
-		}
-		b.WriteString("\n")
-		lines++
-	}
-	for lines < maxLines {
-		b.WriteString("\n")
-		lines++
-	}
-	b.WriteString(styles.Divider.Render(strings.Repeat("─", width)))
-	b.WriteString("\n")
-	return b.String()
-}
-
-// renderHistoryList renders the scrolling list of history entries.
-func (m *mainModel) renderHistoryList(maxHeight, width int) string {
-	if m.histState == nil || len(m.histState.filtered) == 0 {
-		return ""
-	}
-
-	start, end := scrollWindow(m.histState.cursor, len(m.histState.filtered), maxHeight, &m.histState.offset)
-	maxLen := max(width-2, 10)
-
-	b := getBuilder()
-	defer putBuilder(b)
-	for i := start; i < end; i++ {
-		entry := m.histState.filtered[i]
-		display := entry.Display(maxLen)
-		if i == m.histState.cursor {
-			b.WriteString(styles.Cursor.Render("▶ "))
-			b.WriteString(styles.Selected.Render(styles.Command.Render(display)))
-		} else {
-			b.WriteString("  ")
-			b.WriteString(styles.Command.Render(display))
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-// renderHistoryInput renders the bottom divider, hint, and search input.
-func (m *mainModel) renderHistoryInput(width int) string {
-	b := getBuilder()
-	defer putBuilder(b)
-	b.WriteString(styles.Divider.Render(strings.Repeat("─", width)))
-	b.WriteString("\n")
+	extra := ""
 	matchCount := 0
+	var items []string
 	if m.histState != nil {
-		matchCount = len(m.histState.filtered)
+		extra = styles.Dim.Render(fmt.Sprintf("(%d entries)", len(m.histState.picker.Items)))
+		matchCount = len(m.histState.picker.Filtered)
+		for _, e := range m.histState.picker.Filtered {
+			items = append(items, e.Display(max(m.width-2, 10)))
+		}
 	}
-	b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d matches", matchCount)))
-	b.WriteString(" • ")
-	b.WriteString(styles.Dim.Render("ESC cancel"))
-	b.WriteString(" • ")
-	b.WriteString(styles.Dim.Render("Enter re-run cheat"))
-	b.WriteString("\n")
-	b.WriteString(m.textInput.View())
-	return b.String()
+
+	var offset *int
+	var cursor int
+	if m.histState != nil {
+		offset = &m.histState.picker.Offset
+		cursor = m.histState.picker.Cursor
+	} else {
+		zero := 0
+		offset = &zero
+	}
+
+	return m.renderOverlayWindow(OverlayConfig{
+		Title:         "History",
+		TitleExtra:    extra,
+		MatchesCount:  matchCount,
+		EnterHint:     "Enter re-run cheat",
+		Items:         items,
+		SelectedIndex: cursor,
+		Offset:        offset,
+		Input:         m.textInput,
+	})
 }
 
 // findCheatByRef locates a cheat in the index matching the given file path

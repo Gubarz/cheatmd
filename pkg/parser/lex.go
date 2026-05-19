@@ -99,14 +99,17 @@ func parseHeader(line []byte) (string, bool) {
 	if i == 0 || i > 6 {
 		return "", false
 	}
-	if i >= len(line) || line[i] != ' ' {
+	if i >= len(line) {
+		return "", true
+	}
+	if line[i] != ' ' {
 		return "", false
 	}
 	i++
 	if i >= len(line) {
-		return "", false
+		return "", true
 	}
-	return string(line[i:]), true
+	return strings.TrimSpace(string(line[i:])), true
 }
 
 // parseCodeBlockStart parses ```lang title:"desc" without regex.

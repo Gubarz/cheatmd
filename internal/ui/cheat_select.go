@@ -87,56 +87,24 @@ func (item *cheatItem) matchesQuery(words []string) bool {
 	return true
 }
 
-// containsWord reports whether any of the item's searchable fields contains
-// the given lowercased word.
 func (item *cheatItem) containsWord(word string) bool {
-	if containsIgnoreCaseFast(item.folder, word) {
+	if strings.Contains(strings.ToLower(item.folder), word) {
 		return true
 	}
-	if containsIgnoreCaseFast(item.file, word) {
+	if strings.Contains(strings.ToLower(item.file), word) {
 		return true
 	}
-	if containsIgnoreCaseFast(item.cheat.Header, word) {
+	if strings.Contains(strings.ToLower(item.cheat.Header), word) {
 		return true
 	}
-	if containsIgnoreCaseFast(item.cheat.Description, word) {
+	if strings.Contains(strings.ToLower(item.cheat.Description), word) {
 		return true
 	}
-	if containsIgnoreCaseFast(item.cheat.Command, word) {
+	if strings.Contains(strings.ToLower(item.cheat.Command), word) {
 		return true
 	}
 	for _, tag := range item.cheat.Tags {
-		// tags are already lowercased by the parser, but containsIgnoreCaseFast is safe
-		if containsIgnoreCaseFast(tag, word) {
-			return true
-		}
-	}
-	return false
-}
-
-// containsIgnoreCaseFast is a fast, zero-allocation case-insensitive substring check.
-// It assumes lowerSubstr is already lowercased.
-func containsIgnoreCaseFast(s, lowerSubstr string) bool {
-	if len(lowerSubstr) == 0 {
-		return true
-	}
-	if len(lowerSubstr) > len(s) {
-		return false
-	}
-	n := len(lowerSubstr)
-	for i := 0; i <= len(s)-n; i++ {
-		match := true
-		for j := 0; j < n; j++ {
-			c := s[i+j]
-			if c >= 'A' && c <= 'Z' {
-				c += 'a' - 'A'
-			}
-			if c != lowerSubstr[j] {
-				match = false
-				break
-			}
-		}
-		if match {
+		if strings.Contains(strings.ToLower(tag), word) {
 			return true
 		}
 	}
@@ -231,32 +199,26 @@ func (m *mainModel) handleCheatSelectKey(msg tea.KeyMsg) tea.Cmd {
 		m.quitting = true
 		return tea.Quit
 	case "enter":
-		if m.cursor < len(m.filtered) {
-			item := m.filtered[m.cursor]
-			m.selected = item.cheat
+		if opt, ok := m.picker.Selected(); ok {
+			m.selected = opt.cheat
 			return m.startVarResolution()
 		}
-	case "up", "ctrl+p":
-		m.moveCursor(-1)
-	case "down", "ctrl+n":
-		m.moveCursor(1)
-	case "pgup":
-		m.moveCursor(-10)
-	case "pgdown":
-		m.moveCursor(10)
 	case "home", "ctrl+a":
-		m.cursor = 0
+		m.picker.Cursor = 0
 	case "end", "ctrl+e":
-		m.cursor = max(0, len(m.filtered)-1)
+		m.picker.Cursor = max(0, len(m.picker.Filtered)-1)
 	default:
+		if m.picker.HandleKey(msg) {
+			return nil
+		}
 		if msg.String() == config.GetKeyOpen() {
-			if m.cursor < len(m.filtered) {
-				openFileInViewer(m.filtered[m.cursor].cheat.File)
+			if opt, ok := m.picker.Selected(); ok {
+				openFileInViewer(opt.cheat.File)
 			}
 		}
 		if msg.String() == config.GetKeyPreview() {
-			if m.cursor < len(m.filtered) {
-				if m.enterPreview(m.filtered[m.cursor].cheat) {
+			if opt, ok := m.picker.Selected(); ok {
+				if m.enterPreview(opt.cheat) {
 					return tea.ClearScreen
 				}
 			}
@@ -270,45 +232,32 @@ func (m *mainModel) handleCheatSelectKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (m *mainModel) moveCursor(delta int) {
-	m.cursor += delta
-	m.cursor = clamp(m.cursor, 0, max(0, len(m.filtered)-1))
-}
-
 // filterCheats filters the cheat list based on the search query.
 func (m *mainModel) filterCheats() {
 	query := strings.TrimSpace(m.textInput.Value())
 
-	if query == "" {
-		m.filtered = m.cheats
-	} else if chainQuery, ok := parseChainQuery(query); ok {
+	if chainQuery, ok := parseChainQuery(query); ok {
 		words := strings.Fields(strings.ToLower(chainQuery))
-		m.filtered = make([]cheatItem, 0, min(len(m.chains), 1000))
+		filteredChains := make([]cheatItem, 0, min(len(m.chains), 1000))
 		for _, chain := range m.chains {
 			if !chainMatchesQuery(chain, words) {
 				continue
 			}
 			if cheat := m.nextChainStep(chain); cheat != nil {
-				m.filtered = append(m.filtered, newChainItem(chain, cheat))
-				if len(m.filtered) >= 1000 {
+				filteredChains = append(filteredChains, newChainItem(chain, cheat))
+				if len(filteredChains) >= 1000 {
 					break
 				}
 			}
 		}
+		m.picker.SetItems(filteredChains)
 	} else {
-		words := strings.Fields(strings.ToLower(query))
-		m.filtered = make([]cheatItem, 0, min(len(m.cheats), 1000))
-		for i := range m.cheats {
-			if m.cheats[i].matchesQuery(words) {
-				m.filtered = append(m.filtered, m.cheats[i])
-				if len(m.filtered) >= 1000 {
-					break
-				}
-			}
+		// Just standard filter
+		if len(m.picker.Items) != len(m.cheats) {
+			m.picker.SetItems(m.cheats)
 		}
+		m.picker.Filter(query)
 	}
-
-	m.cursor = clamp(m.cursor, 0, max(0, len(m.filtered)-1))
 }
 
 func parseChainQuery(query string) (string, bool) {
@@ -390,8 +339,8 @@ func (m *mainModel) renderPreviewWithHeight(width int, maxLines int) string {
 	defer putBuilder(b)
 	lines := 0
 
-	if m.cursor < len(m.filtered) {
-		item := m.filtered[m.cursor]
+	if opt, ok := m.picker.Selected(); ok {
+		item := opt
 		pathDisplay := buildPathDisplay(item.folder, item.file)
 		if pathDisplay != "" && lines < maxLines {
 			b.WriteString(styles.PreviewPath.Render(pathDisplay))
@@ -439,18 +388,17 @@ func (m *mainModel) renderPreviewWithHeight(width int, maxLines int) string {
 
 // renderList renders the scrollable list of cheats.
 func (m *mainModel) renderList(maxHeight int) string {
-	if len(m.filtered) == 0 {
-		return ""
+	if len(m.picker.Filtered) == 0 {
+		return styles.Dim.Render("No cheats found. Press ESC to clear search.")
 	}
 
-	start, end := scrollWindow(m.cursor, len(m.filtered), maxHeight, &m.offset)
+	start, end := scrollWindow(m.picker.Cursor, len(m.picker.Filtered), maxHeight, &m.picker.Offset)
 	gap := strings.Repeat(" ", m.columns.gap)
 
-	b := getBuilder()
-	defer putBuilder(b)
+	var b strings.Builder
 	for i := start; i < end; i++ {
-		item := m.filtered[i]
-		isSelected := i == m.cursor
+		item := m.picker.Filtered[i]
+		isSelected := i == m.picker.Cursor
 		b.WriteString(m.renderListItem(item, isSelected, gap))
 		b.WriteString("\n")
 	}
@@ -557,7 +505,7 @@ func (m *mainModel) renderInput(width int) string {
 	defer putBuilder(b)
 	b.WriteString(styles.Divider.Render(strings.Repeat("─", width)))
 	b.WriteString("\n")
-	b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d/%d", len(m.filtered), len(m.cheats))))
+	b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d/%d", len(m.picker.Filtered), len(m.cheats))))
 	b.WriteString(" • ")
 	keyOpen := config.GetKeyOpen()
 	if keyOpen == "" {

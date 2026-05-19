@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 
 	"github.com/gubarz/cheatmd/pkg/config"
@@ -62,27 +61,9 @@ type varState struct {
 }
 
 // collectVariables gathers all variable definitions from imports and local
-// Also detects variable dependencies (vars referenced in other vars' shell commands)
-// Supports conditional var definitions (if/fi blocks) - stores all variants per name
-//
-// When config.GetAllowUndeclaredVars() is true, variables referenced in the
-// command but not declared anywhere get a prompt-only definition synthesized
-// so the user is asked for a value at runtime. When false (default), such
-// variables are silently skipped.
+// and wraps them in UI-specific varState objects.
 func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState {
-	varDefs := collectVarDefinitions(cheat, index)
-	usedVars := findAllVars(cheat.Command, config.GetVarSyntax())
-
-	if config.GetAllowUndeclaredVars() {
-		for _, name := range usedVars {
-			if _, ok := varDefs[name]; !ok {
-				varDefs[name] = []parser.VarDef{{Name: name}}
-			}
-		}
-	}
-
-	allNeeded := findAllDependencies(usedVars, varDefs)
-	orderedVars := topologicalSort(usedVars, varDefs, allNeeded)
+	orderedVars, varDefs := executor.CollectDependencies(cheat, index)
 
 	var vars []varState
 	for _, varName := range orderedVars {
@@ -94,98 +75,6 @@ func collectVariables(cheat *parser.Cheat, index *parser.CheatIndex) []varState 
 		}
 	}
 	return vars
-}
-
-// collectVarDefinitions gathers all var definitions from imports and local cheat
-func collectVarDefinitions(cheat *parser.Cheat, index *parser.CheatIndex) map[string][]parser.VarDef {
-	varDefs := make(map[string][]parser.VarDef)
-
-	// Collect from imports recursively
-	var collectFromImports func(imports []string, seen map[string]bool)
-	collectFromImports = func(imports []string, seen map[string]bool) {
-		for _, importName := range imports {
-			if seen[importName] {
-				continue
-			}
-			seen[importName] = true
-			if module, ok := index.Modules[importName]; ok {
-				collectFromImports(module.Imports, seen)
-				for _, v := range module.Vars {
-					varDefs[v.Name] = append(varDefs[v.Name], v)
-				}
-			}
-		}
-	}
-	collectFromImports(cheat.Imports, make(map[string]bool))
-
-	// Local definitions
-	for _, v := range cheat.Vars {
-		varDefs[v.Name] = append(varDefs[v.Name], v)
-	}
-	return varDefs
-}
-
-// varDefDependencies returns all variable references in a VarDef
-func varDefDependencies(def parser.VarDef) []string {
-	var deps []string
-	deps = append(deps, findAllVars(def.Shell, "dollar")...)
-	deps = append(deps, findAllVars(def.Literal, "dollar")...)
-	deps = append(deps, findAllVars(def.Condition, "dollar")...)
-	return deps
-}
-
-// findAllDependencies finds transitive closure of all needed variables
-func findAllDependencies(usedVars []string, varDefs map[string][]parser.VarDef) map[string]bool {
-	allNeeded := make(map[string]bool)
-	queue := make([]string, len(usedVars))
-	copy(queue, usedVars)
-
-	for len(queue) > 0 {
-		varName := queue[0]
-		queue = queue[1:]
-
-		if allNeeded[varName] {
-			continue
-		}
-		allNeeded[varName] = true
-
-		for _, def := range varDefs[varName] {
-			for _, dep := range varDefDependencies(def) {
-				if !allNeeded[dep] {
-					queue = append(queue, dep)
-				}
-			}
-		}
-	}
-	return allNeeded
-}
-
-// topologicalSort orders variables by their dependencies
-func topologicalSort(usedVars []string, varDefs map[string][]parser.VarDef, allNeeded map[string]bool) []string {
-	var orderedVars []string
-	added := make(map[string]bool)
-	visiting := make(map[string]bool)
-
-	var addWithDeps func(varName string)
-	addWithDeps = func(varName string) {
-		if added[varName] || !allNeeded[varName] || visiting[varName] {
-			return
-		}
-		visiting[varName] = true
-		for _, def := range varDefs[varName] {
-			for _, dep := range varDefDependencies(def) {
-				addWithDeps(dep)
-			}
-		}
-		visiting[varName] = false
-		added[varName] = true
-		orderedVars = append(orderedVars, varName)
-	}
-
-	for _, v := range usedVars {
-		addWithDeps(v)
-	}
-	return orderedVars
 }
 
 // selectVariant picks the first variant whose condition matches, or nil if none match
@@ -202,64 +91,12 @@ func selectVariant(variants []parser.VarDef, scope map[string]string) *parser.Va
 			}
 			continue
 		}
-		if evaluateCondition(v.Condition, scope) {
+		if executor.EvaluateCondition(v.Condition, scope) {
 			return v
 		}
 	}
 
 	return defaultDef
-}
-
-// evaluateCondition evaluates a condition expression against the scope
-// Supports: $var == value, $var != value, $var (truthy check)
-func evaluateCondition(condition string, scope map[string]string) bool {
-	condition = strings.TrimSpace(condition)
-
-	// Substitute variables in condition (longest names first to prevent
-	// prefix collisions, e.g. $s matching inside $scheme).
-	condition = executor.SubstituteVars(condition, scope, "dollar")
-
-	// Check for comparison operators
-	if strings.Contains(condition, "==") {
-		parts := strings.SplitN(condition, "==", 2)
-		if len(parts) == 2 {
-			left := strings.TrimSpace(parts[0])
-			right := strings.TrimSpace(parts[1])
-			return left == right
-		}
-	}
-
-	if strings.Contains(condition, "!=") {
-		parts := strings.SplitN(condition, "!=", 2)
-		if len(parts) == 2 {
-			left := strings.TrimSpace(parts[0])
-			right := strings.TrimSpace(parts[1])
-			return left != right
-		}
-	}
-
-	// Truthy check - non-empty after substitution
-	return condition != ""
-}
-
-// replaceVar replaces variable references in cmd with replacement.
-// Respects var_syntax config: replaces `$varname` when dollar syntax is
-// enabled, and `<varname>` when angle syntax is enabled.
-func replaceVar(cmd, varName, replacement string, syntax string) string {
-	q := regexp.QuoteMeta(varName)
-	var parts []string
-	if syntax == "dollar" || syntax == "both" {
-		parts = append(parts, `\$`+q+`\b`)
-	}
-	if syntax == "angle" || syntax == "both" {
-		parts = append(parts, `<`+q+`>`)
-	}
-	if len(parts) == 0 {
-		return cmd
-	}
-	pattern := strings.Join(parts, "|")
-	re := regexp.MustCompile(pattern)
-	return re.ReplaceAllLiteralString(cmd, replacement)
 }
 
 // extractCustomHeader parses --header from selector args
@@ -311,119 +148,7 @@ func executeOutput(command string, exec Executor) error {
 // String Utilities
 // ============================================================================
 
-// findAllVars finds ALL variable references in a command, ignoring quoting.
-// The syntax parameter controls which variable forms are replaced:
-// "dollar", "angle", or "both".
-// `<name|default>` is never auto-resolved (use a `<!-- cheat -->` block to
-// declare defaults).
-func findAllVars(cmd string, syntax string) []string {
-	allowDollar := syntax == "dollar" || syntax == "both"
-	allowAngle := syntax == "angle" || syntax == "both"
 
-	var vars []string
-	seen := make(map[string]bool)
-	add := func(name string) {
-		if seen[name] {
-			return
-		}
-		seen[name] = true
-		vars = append(vars, name)
-	}
-
-	for i := 0; i < len(cmd); i++ {
-		switch cmd[i] {
-		case '$':
-			if !allowDollar {
-				continue
-			}
-			if i+1 >= len(cmd) {
-				continue
-			}
-			// Skip escaped $
-			if i > 0 && cmd[i-1] == '\\' {
-				continue
-			}
-			j := i + 1
-			for j < len(cmd) && isVarChar(cmd[j], j == i+1) {
-				j++
-			}
-			if j > i+1 {
-				add(cmd[i+1 : j])
-			}
-			i = j - 1
-		case '<':
-			if !allowAngle {
-				continue
-			}
-			j := i + 1
-			if j >= len(cmd) {
-				continue
-			}
-			if !isVarChar(cmd[j], true) {
-				continue
-			}
-			j++
-			for j < len(cmd) && isVarChar(cmd[j], false) {
-				j++
-			}
-			// Must close with '>' to be a variable reference; skip
-			// `<name|default>` (default-bearing form is not auto-resolved).
-			if j >= len(cmd) || cmd[j] != '>' {
-				continue
-			}
-			add(cmd[i+1 : j])
-			i = j
-		}
-	}
-
-	return vars
-}
-
-// splitLines splits text into non-empty trimmed lines
-// Optimized for large inputs - uses strings.Index instead of Split
-func splitLines(s string) []string {
-	if s == "" {
-		return nil
-	}
-
-	// Count lines first to pre-allocate (rough estimate)
-	lineCount := strings.Count(s, "\n") + 1
-	lines := make([]string, 0, lineCount)
-
-	for len(s) > 0 {
-		idx := strings.IndexByte(s, '\n')
-		var line string
-		if idx == -1 {
-			line = s
-			s = ""
-		} else {
-			line = s[:idx]
-			s = s[idx+1:]
-		}
-
-		// Trim inline (avoid TrimSpace allocation if not needed)
-		start, end := 0, len(line)
-		for start < end && (line[start] == ' ' || line[start] == '\t' || line[start] == '\r') {
-			start++
-		}
-		for end > start && (line[end-1] == ' ' || line[end-1] == '\t' || line[end-1] == '\r') {
-			end--
-		}
-		if start < end {
-			lines = append(lines, line[start:end])
-		}
-	}
-
-	return lines
-}
-
-// isVarChar returns true if c is valid in a variable name
-func isVarChar(c byte, first bool) bool {
-	if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' {
-		return true
-	}
-	return !first && c >= '0' && c <= '9'
-}
 
 // parseShellArgs parses a string into arguments, respecting quotes
 func parseShellArgs(s string) []string {

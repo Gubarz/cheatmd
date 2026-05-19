@@ -3,6 +3,8 @@ package ui
 import (
 	"reflect"
 	"testing"
+
+	"github.com/gubarz/cheatmd/pkg/parser"
 )
 
 func TestParseShellArgs(t *testing.T) {
@@ -243,7 +245,7 @@ func TestSplitLines(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := splitLines(tt.input)
+			got := parser.SplitLines(tt.input)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("splitLines(%q) = %v, want %v", tt.input, got, tt.want)
 			}
@@ -259,7 +261,7 @@ func TestEndToEnd_DelimiterColumnPipeline(t *testing.T) {
 	selectorArgs := `--delimiter "," --column 2 --select-column 1`
 
 	// 1. Split shell output into lines
-	lines := splitLines(shellOutput)
+	lines := parser.SplitLines(shellOutput)
 	if len(lines) != 2 {
 		t.Fatalf("splitLines() = %d lines, want 2", len(lines))
 	}

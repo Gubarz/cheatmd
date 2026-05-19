@@ -138,8 +138,8 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 		m.textInput.SetValue(initialQuery)
 		m.filterCheats()
 
-		if (autoSelect || resumeChain) && len(m.filtered) == 1 {
-			m.selected = m.filtered[0].cheat
+		if (autoSelect || resumeChain) && len(m.picker.Filtered) == 1 {
+			m.selected = m.picker.Filtered[0].cheat
 			m.startVarResolutionInternal()
 
 			if m.phase != phaseVarResolve {

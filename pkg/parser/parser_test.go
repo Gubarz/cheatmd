@@ -82,7 +82,7 @@ func TestParseCheatDSL(t *testing.T) {
 	dslBlock := "var host = 192.168.1.1\nvar port = 80,443 --- Target ports\nvar timeout = 10"
 
 	cheat := &Cheat{}
-	parseCheatDSL(cheat, dslBlock)
+	parseCheatDSL(cheat, dslBlock, "test.md", 1)
 
 	if len(cheat.Vars) != 3 {
 		t.Fatalf("parseCheatDSL() parsed %d vars, want 3", len(cheat.Vars))
@@ -101,7 +101,7 @@ func TestParseCheatDSL_Literal(t *testing.T) {
 	dslBlock := "var greeting := hello world"
 
 	cheat := &Cheat{}
-	parseCheatDSL(cheat, dslBlock)
+	parseCheatDSL(cheat, dslBlock, "test.md", 1)
 
 	if len(cheat.Vars) != 1 {
 		t.Fatalf("parseCheatDSL() parsed %d vars, want 1", len(cheat.Vars))
@@ -116,7 +116,7 @@ func TestParseCheatDSL_Conditional(t *testing.T) {
 	dslBlock := "if $method == password\nvar cred = echo enter-password\nfi"
 
 	cheat := &Cheat{}
-	parseCheatDSL(cheat, dslBlock)
+	parseCheatDSL(cheat, dslBlock, "test.md", 1)
 
 	if len(cheat.Vars) != 1 {
 		t.Fatalf("parseCheatDSL() parsed %d vars, want 1", len(cheat.Vars))
@@ -131,7 +131,7 @@ func TestParseCheatDSL_ExportImport(t *testing.T) {
 	dslBlock := "export mymodule\nimport othermodule"
 
 	cheat := &Cheat{}
-	parseCheatDSL(cheat, dslBlock)
+	parseCheatDSL(cheat, dslBlock, "test.md", 1)
 
 	if cheat.Export != "mymodule" {
 		t.Errorf("parseCheatDSL() Export = %q, want %q", cheat.Export, "mymodule")
@@ -146,7 +146,7 @@ func TestParseCheatDSL_Chain(t *testing.T) {
 	dslBlock := "chain privesc 2"
 
 	cheat := &Cheat{}
-	parseCheatDSL(cheat, dslBlock)
+	parseCheatDSL(cheat, dslBlock, "test.md", 1)
 
 	if cheat.ChainName != "privesc" || cheat.ChainStep != 2 {
 		t.Fatalf("chain = %q %d, want privesc 2", cheat.ChainName, cheat.ChainStep)
@@ -157,7 +157,7 @@ func TestParseCheatDSL_Comments(t *testing.T) {
 	dslBlock := "# this is a comment\nvar host = echo localhost"
 
 	cheat := &Cheat{}
-	parseCheatDSL(cheat, dslBlock)
+	parseCheatDSL(cheat, dslBlock, "test.md", 1)
 
 	if len(cheat.Vars) != 1 {
 		t.Fatalf("parseCheatDSL() parsed %d vars, want 1", len(cheat.Vars))
@@ -172,7 +172,7 @@ func TestParseCheatDSL_PromptOnlyWithArgs(t *testing.T) {
 	dslBlock := "if $auth_method != kerberos\nvar credential --- --header \"Credential\"\nfi"
 
 	cheat := &Cheat{}
-	parseCheatDSL(cheat, dslBlock)
+	parseCheatDSL(cheat, dslBlock, "test.md", 1)
 
 	if len(cheat.Vars) != 1 {
 		t.Fatalf("parseCheatDSL() parsed %d vars, want 1", len(cheat.Vars))
