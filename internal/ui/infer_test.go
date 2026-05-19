@@ -16,24 +16,24 @@ func TestExtractEmbeddedVars(t *testing.T) {
 	}{
 		{
 			name:     "simple extraction",
-			template: "-p $credential",
-			actual:   "-p mypassword",
+			template: "--value $setting",
+			actual:   "--value blue",
 			scope:    map[string]string{},
-			expected: map[string]string{"credential": "mypassword"},
+			expected: map[string]string{"setting": "blue"},
 		},
 		{
 			name:     "extraction with colon",
-			template: "-p $credential",
-			actual:   "-p :mypassword",
+			template: "--value $setting",
+			actual:   "--value :blue",
 			scope:    map[string]string{},
-			expected: map[string]string{"credential": ":mypassword"},
+			expected: map[string]string{"setting": ":blue"},
 		},
 		{
-			name:     "hash extraction",
-			template: "-H $credential",
-			actual:   "-H aad3b435b51404eeaad3b435b51404ee:abc123",
+			name:     "compound value extraction",
+			template: "--value $setting",
+			actual:   "--value alpha:beta",
 			scope:    map[string]string{},
-			expected: map[string]string{"credential": "aad3b435b51404eeaad3b435b51404ee:abc123"},
+			expected: map[string]string{"setting": "alpha:beta"},
 		},
 	}
 
@@ -65,34 +65,34 @@ func TestPrefillScopeFromMatch(t *testing.T) {
 		expectedScope map[string]string
 	}{
 		{
-			name:    "auth_flags extraction with -k",
-			command: "bloodyad --host $dc_ip -d $domain $auth_flags",
-			input:   "bloodyad --host 10.0.0.1 -d test.local -k",
+			name:    "mode_flags extraction with dry run",
+			command: "deployctl --server $server -p $project $mode_flags",
+			input:   "deployctl --server app01 -p website --dry-run",
 			expectedScope: map[string]string{
-				"dc_ip":      "10.0.0.1",
-				"domain":     "test.local",
-				"auth_flags": "-k",
+				"server":     "app01",
+				"project":    "website",
+				"mode_flags": "--dry-run",
 			},
 		},
 		{
-			name:    "auth_flags extraction with -p password",
-			command: "bloodyad --host $dc_ip -d $domain $auth_flags",
-			input:   "bloodyad --host 10.0.0.1 -d test.local -p mypassword",
+			name:    "mode_flags extraction with labeled value",
+			command: "deployctl --server $server -p $project $mode_flags",
+			input:   "deployctl --server app01 -p website --tag stable",
 			expectedScope: map[string]string{
-				"dc_ip":      "10.0.0.1",
-				"domain":     "test.local",
-				"auth_flags": "-p mypassword",
+				"server":     "app01",
+				"project":    "website",
+				"mode_flags": "--tag stable",
 			},
 		},
 		{
-			name:    "full bloodyAD command with mid-command auth_flags",
-			command: "bloodyAD --host $rhost_name -d $domain -u $user $auth_flags add badSuccessor $rhost_name",
-			input:   "bloodyAD --host test -d bacon.htb -u Administrator -p 123 add badSuccessor test",
+			name:    "full deploy command with mid-command flags",
+			command: "deployctl --server $server -p $project -u $user $mode_flags apply service $server",
+			input:   "deployctl --server app01 -p website -u alice --tag stable apply service app01",
 			expectedScope: map[string]string{
-				"rhost_name": "test",
-				"domain":     "bacon.htb",
-				"user":       "Administrator",
-				"auth_flags": "-p 123",
+				"server":     "app01",
+				"project":    "website",
+				"user":       "alice",
+				"mode_flags": "--tag stable",
 			},
 		},
 	}
@@ -120,17 +120,51 @@ func TestPrefillScopeFromMatch(t *testing.T) {
 	}
 }
 
+func TestFindMatchingCheatPrefersSpecificCommandOverVarOnly(t *testing.T) {
+	input := "make deploy SERVICE=api ENV=prod LOG=run-$(date +%Y%m%d-%H%M%S).txt"
+	varOnly := &parser.Cheat{
+		Header:  "Single value",
+		Command: "$item_name",
+	}
+	deploy := &parser.Cheat{
+		Header:  "Deploy service",
+		Command: "make deploy SERVICE=$service ENV=$env LOG=run-$(date +%Y%m%d-%H%M%S).txt",
+	}
+
+	got := findMatchingCheat([]*parser.Cheat{varOnly, deploy}, input)
+	if got != deploy {
+		t.Fatalf("matched %q, want %q", got.Header, deploy.Header)
+	}
+
+	prefillScopeFromMatch(got, input)
+	if got.Scope["service"] != "api" {
+		t.Fatalf("service = %q, want api", got.Scope["service"])
+	}
+	if got.Scope["env"] != "prod" {
+		t.Fatalf("env = %q, want prod", got.Scope["env"])
+	}
+}
+
+func TestFindMatchingCheatDoesNotUseVarOnlyAsCatchAll(t *testing.T) {
+	got := findMatchingCheat([]*parser.Cheat{
+		{Header: "Single value", Command: "$item_name"},
+	}, "tool run thing --flag value")
+	if got != nil {
+		t.Fatalf("matched %q, want nil", got.Header)
+	}
+}
+
 func TestInferDependentVars(t *testing.T) {
 	index := &parser.CheatIndex{
 		Modules: map[string]*parser.Module{
-			"bloodyad": {
-				Name: "bloodyad",
+			"deploy": {
+				Name: "deploy",
 				Vars: []parser.VarDef{
-					{Name: "auth_method", Shell: "echo -e 'kerberos\npassword\nhash'"},
-					{Name: "auth_flags", Literal: "-k", Condition: "$auth_method == kerberos"},
-					{Name: "auth_flags", Literal: "-p $credential", Condition: "$auth_method == password"},
-					{Name: "auth_flags", Literal: "-H $credential", Condition: "$auth_method == hash"},
-					{Name: "credential", Shell: ""},
+					{Name: "run_mode", Shell: "printf 'preview\npublish\narchive\n'"},
+					{Name: "mode_flags", Literal: "--dry-run", Condition: "$run_mode == preview"},
+					{Name: "mode_flags", Literal: "--tag $label", Condition: "$run_mode == publish"},
+					{Name: "mode_flags", Literal: "--archive $label", Condition: "$run_mode == archive"},
+					{Name: "label", Shell: ""},
 				},
 			},
 		},
@@ -143,23 +177,23 @@ func TestInferDependentVars(t *testing.T) {
 		imports       []string
 	}{
 		{
-			name:         "kerberos flag should infer auth_method",
-			initialScope: map[string]string{"auth_flags": "-k"},
+			name:         "preview flag should infer run_mode",
+			initialScope: map[string]string{"mode_flags": "--dry-run"},
 			expectedScope: map[string]string{
-				"auth_flags":  "-k",
-				"auth_method": "kerberos",
+				"mode_flags": "--dry-run",
+				"run_mode":   "preview",
 			},
-			imports: []string{"bloodyad"},
+			imports: []string{"deploy"},
 		},
 		{
-			name:         "password flag should infer auth_method and credential",
-			initialScope: map[string]string{"auth_flags": "-p mypassword"},
+			name:         "publish flag should infer run_mode and label",
+			initialScope: map[string]string{"mode_flags": "--tag stable"},
 			expectedScope: map[string]string{
-				"auth_flags":  "-p mypassword",
-				"auth_method": "password",
-				"credential":  "mypassword",
+				"mode_flags": "--tag stable",
+				"run_mode":   "publish",
+				"label":      "stable",
 			},
-			imports: []string{"bloodyad"},
+			imports: []string{"deploy"},
 		},
 	}
 

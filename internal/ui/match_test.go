@@ -29,7 +29,7 @@ func TestBuildMatchPattern(t *testing.T) {
 		},
 		{
 			name:         "multiple vars",
-			cmd:          "nmap -p $port $host",
+			cmd:          "tool run --port $port $host",
 			wantVarNames: []string{"port", "host"},
 		},
 		{
@@ -62,11 +62,11 @@ func TestBuildMatchPattern(t *testing.T) {
 
 func TestCheatItemMatchesQuery(t *testing.T) {
 	cheat := &parser.Cheat{
-		File:        "/cheats/networking/nmap.md",
-		Header:      "Port Scan",
-		Description: "Scan common ports",
-		Command:     "nmap -sV $target",
-		Tags:        []string{"recon", "pentest"},
+		File:        "/cheats/projects/deploy.md",
+		Header:      "Deploy Service",
+		Description: "Deploy a selected service",
+		Command:     "tool deploy $service",
+		Tags:        []string{"release", "service"},
 	}
 	item := newCheatItem(cheat)
 
@@ -75,15 +75,15 @@ func TestCheatItemMatchesQuery(t *testing.T) {
 		words []string
 		want  bool
 	}{
-		{"matches folder", []string{"network"}, true},
-		{"matches file", []string{"nmap"}, true},
-		{"matches header", []string{"port"}, true},
-		{"matches description", []string{"common"}, true},
-		{"matches command", []string{"nmap"}, true},
-		{"matches tag", []string{"pentest"}, true},
-		{"matches multiple words", []string{"nmap", "port"}, true},
-		{"no match", []string{"gobuster"}, false},
-		{"partial multi match fails", []string{"nmap", "gobuster"}, false},
+		{"matches folder", []string{"projects"}, true},
+		{"matches file", []string{"deploy"}, true},
+		{"matches header", []string{"service"}, true},
+		{"matches description", []string{"selected"}, true},
+		{"matches command", []string{"tool"}, true},
+		{"matches tag", []string{"release"}, true},
+		{"matches multiple words", []string{"deploy", "service"}, true},
+		{"no match", []string{"invoice"}, false},
+		{"partial multi match fails", []string{"deploy", "invoice"}, false},
 	}
 
 	for _, tt := range tests {

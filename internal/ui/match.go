@@ -11,20 +11,24 @@ import (
 
 // findMatchingCheat finds a cheat whose command pattern matches the input.
 // It builds a regex from the cheat command (replacing $var with capture groups)
-// and returns the first match.
+// and returns the most specific match. A command that is only "$var" matches
+// almost anything, so first-match behavior can steal a more exact command.
 func findMatchingCheat(cheats []*parser.Cheat, input string) *parser.Cheat {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return nil
 	}
 
+	var best *parser.Cheat
+	bestScore := 0
 	for _, cheat := range cheats {
-		pattern, _ := buildMatchPattern(cheat.Command)
-		if pattern.MatchString(input) {
-			return cheat
+		pattern, _, score := buildMatchPatternWithScore(cheat.Command)
+		if pattern.MatchString(input) && score > bestScore {
+			best = cheat
+			bestScore = score
 		}
 	}
-	return nil
+	return best
 }
 
 // buildMatchPattern converts a command template to a regex pattern for matching.
@@ -36,6 +40,11 @@ func findMatchingCheat(cheats []*parser.Cheat, input string) *parser.Cheat {
 // The slice may have duplicates (one entry per capture group) because Go
 // regex doesn't support backreferences.
 func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
+	pattern, varOrder, _ := buildMatchPatternWithScore(cmd)
+	return pattern, varOrder
+}
+
+func buildMatchPatternWithScore(cmd string) (*regexp.Regexp, []string, int) {
 	var parts []string
 	if config.VarSyntaxAllowsDollar() {
 		parts = append(parts, `\$(\w+)`)
@@ -50,6 +59,7 @@ func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
 	allMatches := varPattern.FindAllStringSubmatchIndex(cmd, -1)
 
 	var varOrder []string
+	literalScore := 0
 
 	var result strings.Builder
 	result.WriteString(`^\s*`)
@@ -68,7 +78,9 @@ func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
 		}
 
 		if varStart > lastEnd {
-			result.WriteString(regexp.QuoteMeta(cmd[lastEnd:varStart]))
+			literal := cmd[lastEnd:varStart]
+			literalScore += len(strings.TrimSpace(literal))
+			result.WriteString(regexp.QuoteMeta(literal))
 		}
 
 		varOrder = append(varOrder, varName)
@@ -120,15 +132,17 @@ func buildMatchPattern(cmd string) (*regexp.Regexp, []string) {
 	}
 
 	if lastEnd < len(cmd) {
-		result.WriteString(regexp.QuoteMeta(cmd[lastEnd:]))
+		literal := cmd[lastEnd:]
+		literalScore += len(strings.TrimSpace(literal))
+		result.WriteString(regexp.QuoteMeta(literal))
 	}
 	result.WriteString(`\s*$`)
 
 	re, err := regexp.Compile(result.String())
 	if err != nil {
-		return regexp.MustCompile(`^$`), nil
+		return regexp.MustCompile(`^$`), nil, 0
 	}
-	return re, varOrder
+	return re, varOrder, literalScore
 }
 
 // prefillScopeFromMatch extracts variable values from the matched command and
