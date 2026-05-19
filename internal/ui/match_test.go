@@ -60,32 +60,6 @@ func TestBuildMatchPattern(t *testing.T) {
 	}
 }
 
-func TestContainsIgnoreCaseFast(t *testing.T) {
-	tests := []struct {
-		name   string
-		s      string
-		substr string
-		want   bool
-	}{
-		{"lowercase match", "Hello World", "hello", true},
-		{"substr must be lowered", "Hello World", "WORLD", false},
-		{"end of string", "Hello World", "world", true},
-		{"all caps source", "NMAP", "nmap", true},
-		{"substr longer than s", "short", "longer string", false},
-		{"empty source", "", "x", false},
-		{"empty substr", "anything", "", true},
-		{"mixed case", "CasE MiXeD", "case mixed", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := containsIgnoreCaseFast(tt.s, tt.substr)
-			if got != tt.want {
-				t.Errorf("containsIgnoreCaseFast(%q, %q) = %v, want %v", tt.s, tt.substr, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestCheatItemMatchesQuery(t *testing.T) {
 	cheat := &parser.Cheat{

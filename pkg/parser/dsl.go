@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -10,12 +11,16 @@ import (
 // Hand-rolled dispatch on the first keyword (var / if / fi / export / import / chain)
 // avoids per-line regex matching. Each non-comment, non-blank line is matched
 // against at most one branch.
-func parseCheatDSL(cheat *Cheat, content string) {
+func parseCheatDSL(cheat *Cheat, content string, path string, startLine int) []ParseError {
 	lines := joinContinuationLines(strings.Split(content, "\n"))
 
 	var currentCondition string
+	var errs []ParseError
+	ifDepth := 0
+	ifLines := []int{}
 
-	for _, line := range lines {
+	for i, line := range lines {
+		lineNo := startLine + i
 		line = strings.TrimSpace(line)
 		if line == "" || line[0] == '#' {
 			continue
@@ -24,41 +29,74 @@ func parseCheatDSL(cheat *Cheat, content string) {
 		keyword, rest := splitFirstWord(line)
 		switch keyword {
 		case "fi":
-			if rest == "" {
-				currentCondition = ""
-			}
-		case "if":
 			if rest != "" {
+				errs = append(errs, ParseError{File: path, Line: lineNo, Message: fmt.Sprintf("`fi` takes no arguments, got %q", rest)})
+			}
+			if ifDepth == 0 {
+				errs = append(errs, ParseError{File: path, Line: lineNo, Message: "`fi` without a matching `if`"})
+			} else {
+				ifDepth--
+				ifLines = ifLines[:len(ifLines)-1]
+			}
+			currentCondition = ""
+		case "if":
+			if rest == "" {
+				errs = append(errs, ParseError{File: path, Line: lineNo, Message: "`if` requires a condition"})
+			} else {
 				currentCondition = rest
 			}
+			ifDepth++
+			ifLines = append(ifLines, lineNo)
 		case "export":
-			if rest != "" && !containsWhitespace(rest) {
+			if rest == "" {
+				errs = append(errs, ParseError{File: path, Line: lineNo, Message: "`export` requires a name"})
+			} else if containsWhitespace(rest) {
+				errs = append(errs, ParseError{File: path, Line: lineNo, Message: "`export` name must be a single token"})
+			} else {
 				cheat.Export = rest
 			}
 		case "import":
-			if rest != "" && !containsWhitespace(rest) {
+			if rest == "" {
+				errs = append(errs, ParseError{File: path, Line: lineNo, Message: "`import` requires a name"})
+			} else if containsWhitespace(rest) {
+				errs = append(errs, ParseError{File: path, Line: lineNo, Message: "`import` name must be a single token"})
+			} else {
 				cheat.Imports = append(cheat.Imports, rest)
 			}
 		case "chain":
-			parseChainLine(cheat, rest)
+			if err := parseChainLine(cheat, rest); err != "" {
+				errs = append(errs, ParseError{File: path, Line: lineNo, Message: err})
+			}
 		case "var":
-			parseVarLine(cheat, rest, currentCondition)
+			if err := parseVarLine(cheat, rest, currentCondition); err != "" {
+				errs = append(errs, ParseError{File: path, Line: lineNo, Message: err})
+			}
+		default:
+			errs = append(errs, ParseError{File: path, Line: lineNo, Message: fmt.Sprintf("unknown DSL keyword %q (expected one of: var, if, fi, export, import, chain)", keyword)})
 		}
 	}
+	for _, ln := range ifLines {
+		errs = append(errs, ParseError{File: path, Line: ln, Message: "`if` without a matching `fi`"})
+	}
+	return errs
 }
 
-func parseChainLine(cheat *Cheat, rest string) {
+func parseChainLine(cheat *Cheat, rest string) string {
 	name, after := splitFirstWord(rest)
 	stepText, extra := splitFirstWord(after)
 	if name == "" || stepText == "" || extra != "" {
-		return
+		return "`chain` requires exactly a name and positive step number"
+	}
+	if containsWhitespace(name) {
+		return "`chain` name must be a single token"
 	}
 	step, err := strconv.Atoi(stepText)
 	if err != nil || step < 1 {
-		return
+		return "`chain` step must be a positive number"
 	}
 	cheat.ChainName = name
 	cheat.ChainStep = step
+	return ""
 }
 
 // parseVarLine handles the three var declaration forms:
@@ -67,10 +105,13 @@ func parseChainLine(cheat *Cheat, rest string) {
 //	var NAME --- args  -> prompt-only with selector/prompt args
 //	var NAME := value  -> literal
 //	var NAME = value   -> shell
-func parseVarLine(cheat *Cheat, rest, condition string) {
+func parseVarLine(cheat *Cheat, rest, condition string) string {
 	name, after := splitFirstWord(rest)
-	if name == "" || !isValidDSLVarName(name) {
-		return
+	if name == "" {
+		return "`var` requires a name"
+	}
+	if !isValidDSLVarName(name) {
+		return fmt.Sprintf("invalid var name %q", name)
 	}
 
 	if after == "" {
@@ -78,7 +119,7 @@ func parseVarLine(cheat *Cheat, rest, condition string) {
 			Name:      name,
 			Condition: condition,
 		})
-		return
+		return ""
 	}
 
 	switch {
@@ -91,16 +132,19 @@ func parseVarLine(cheat *Cheat, rest, condition string) {
 	case strings.HasPrefix(after, ":="):
 		value := strings.TrimSpace(after[2:])
 		if value == "" {
-			return
+			return fmt.Sprintf("`var %s :=` has no value", name)
 		}
 		cheat.Vars = append(cheat.Vars, ParseVarDefWithCondition(name, value, condition, true))
 	case after[0] == '=':
 		value := strings.TrimSpace(after[1:])
 		if value == "" {
-			return
+			return fmt.Sprintf("`var %s =` has no shell command", name)
 		}
 		cheat.Vars = append(cheat.Vars, ParseVarDefWithCondition(name, value, condition, false))
+	default:
+		return fmt.Sprintf("`var %s ...` is missing an assignment operator (use `=` for shell or `:=` for literal)", name)
 	}
+	return ""
 }
 
 // splitFirstWord returns the leading whitespace-delimited token and the

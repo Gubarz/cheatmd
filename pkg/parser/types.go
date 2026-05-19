@@ -112,11 +112,19 @@ type DuplicateExport struct {
 	File2 string
 }
 
+// ParseError records a syntax error encountered during parsing.
+type ParseError struct {
+	File    string
+	Line    int
+	Message string
+}
+
 // CheatIndex holds all parsed cheats and modules.
 type CheatIndex struct {
 	Cheats        []*Cheat
 	Modules       map[string]*Module
 	Duplicates    []DuplicateExport
+	Errors        []ParseError
 	Root          string
 	ChainMaxSteps map[string]int
 }

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,10 +13,8 @@ import (
 // env/history value, and returns to phaseVarResolve with the chosen value
 // loaded into the var prompt.
 type substituteSearchState struct {
-	options    []substituteOption
-	filtered   []substituteOption
-	cursor     int
-	offset     int
+	picker *Picker[substituteOption]
+
 	prevInput  string // textInput value before entering the overlay
 	prevCursor int
 	prevOffset int
@@ -69,16 +66,16 @@ func (m *mainModel) enterSubstituteSearch() bool {
 		return false
 	}
 	m.subState = &substituteSearchState{
-		options:    opts,
-		filtered:   opts,
+		picker: NewPicker(opts, func(opt substituteOption, words []string) bool {
+			hay := strings.ToLower(opt.Display)
+			return matchesAllWords(hay, words)
+		}),
 		prevInput:  m.textInput.Value(),
-		prevCursor: m.cursor,
-		prevOffset: m.offset,
+		prevCursor: m.picker.Cursor,
+		prevOffset: m.picker.Offset,
 	}
 	m.textInput.SetValue("")
 	m.textInput.Placeholder = "Search env / history..."
-	m.cursor = 0
-	m.offset = 0
 	m.phase = phaseSubstituteSearch
 	return true
 }
@@ -92,63 +89,36 @@ func (m *mainModel) exitSubstituteSearch(accept bool) {
 		return
 	}
 
-	if accept && m.subState.cursor < len(m.subState.filtered) {
-		m.textInput.SetValue(m.subState.filtered[m.subState.cursor].Value)
-		m.textInput.CursorEnd()
+	if accept {
+		if opt, ok := m.subState.picker.Selected(); ok {
+			m.textInput.SetValue(opt.Value)
+			m.textInput.CursorEnd()
+		} else {
+			m.textInput.SetValue(m.subState.prevInput)
+			m.textInput.CursorEnd()
+		}
 	} else {
 		m.textInput.SetValue(m.subState.prevInput)
 		m.textInput.CursorEnd()
 	}
-	m.cursor = m.subState.prevCursor
-	m.offset = m.subState.prevOffset
+	m.picker.Cursor = m.subState.prevCursor
+	m.picker.Offset = m.subState.prevOffset
 	m.subState = nil
 	m.textInput.Placeholder = "Type to filter or enter value..."
 	m.phase = phaseVarResolve
 
 	// Refilter var options if we're in select mode (the input may have changed).
-	if m.varState != nil && !m.varState.isPromptOnly {
-		m.filterVarOptions()
+	if m.varState != nil && !m.varState.isPromptOnly && m.varState.picker != nil {
+		m.varState.picker.Filter(m.textInput.Value())
 	}
 }
 
 // filterSubstituteOptions applies the textInput's current value as a
 // space-separated AND fuzzy filter over the substitute option list.
 func (m *mainModel) filterSubstituteOptions() {
-	if m.subState == nil {
-		return
+	if m.subState != nil {
+		m.subState.picker.Filter(m.textInput.Value())
 	}
-	query := strings.ToLower(strings.TrimSpace(m.textInput.Value()))
-	if query == "" {
-		m.subState.filtered = m.subState.options
-		m.subState.cursor = 0
-		m.subState.offset = 0
-		return
-	}
-	words := strings.Fields(query)
-	result := make([]substituteOption, 0, len(m.subState.options))
-	for _, opt := range m.subState.options {
-		hay := strings.ToLower(opt.Display)
-		if matchesAllWords(hay, words) {
-			result = append(result, opt)
-		}
-	}
-	m.subState.filtered = result
-	if m.subState.cursor >= len(result) {
-		m.subState.cursor = max(0, len(result)-1)
-	}
-	if m.subState.offset > m.subState.cursor {
-		m.subState.offset = m.subState.cursor
-	}
-}
-
-// moveSubstituteCursor clamps the cursor; offset is reconciled by scrollWindow
-// at render time using the actual list height.
-func (m *mainModel) moveSubstituteCursor(delta int) {
-	if m.subState == nil {
-		return
-	}
-	m.subState.cursor += delta
-	m.subState.cursor = clamp(m.subState.cursor, 0, max(0, len(m.subState.filtered)-1))
 }
 
 // handleSubstituteSearchKey processes keys while in phaseSubstituteSearch.
@@ -164,125 +134,53 @@ func (m *mainModel) handleSubstituteSearchKey(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		m.exitSubstituteSearch(true)
 		return tea.ClearScreen
-	case "up", "ctrl+p":
-		m.moveSubstituteCursor(-1)
-		return nil
-	case "down", "ctrl+n":
-		m.moveSubstituteCursor(1)
-		return nil
-	case "pgup":
-		m.moveSubstituteCursor(-10)
-		return nil
-	case "pgdown":
-		m.moveSubstituteCursor(10)
+	}
+	if m.subState != nil && m.subState.picker.HandleKey(msg) {
 		return nil
 	}
 	return nil
 }
 
 // renderSubstituteSearch renders the env/history picker overlay using the
-// same layout shape as renderCheatSelect: fixed-height preview at top,
-// scrolling list in the middle, padding, divider + info + input at bottom.
+// shared overlay layout.
 func (m *mainModel) renderSubstituteSearch() string {
-	width := max(m.width, 80)
-	height := m.height
-	if height < 1 {
-		height = 24
-	}
+	extra := ""
+	matchCount := 0
+	var items []string
 
-	inputLines := 3 // divider + info + input
-
-	// Preview block is just two lines: title + divider. Match the cheat
-	// select pattern that uses a padded fixed-height block.
-	previewHeight := 2
-	preview := m.renderSubstitutePreview(width, previewHeight)
-	
-	previewLines := countLines(preview)
-	listHeight := max(height-previewLines-inputLines, 1)
-	list := m.renderSubstituteList(listHeight)
-
-	return renderWindowLayout(height, preview, list, m.renderSubstituteInput(width))
-}
-
-// renderSubstitutePreview renders the title header at fixed height (padded),
-// followed by a divider. Mirrors renderPreviewWithHeight's shape.
-func (m *mainModel) renderSubstitutePreview(width, maxLines int) string {
-	b := getBuilder()
-	defer putBuilder(b)
-	lines := 0
-
-	if lines < maxLines {
+	if m.subState != nil {
 		var varName string
 		if m.varState != nil && m.varState.currentIdx < len(m.varState.vars) {
 			varName = m.varState.vars[m.varState.currentIdx].def.Name
 		}
-		b.WriteString(styles.Header.Render("Substitute search"))
 		if varName != "" {
-			b.WriteString("  ")
-			b.WriteString(styles.Dim.Render("→ "))
-			b.WriteString(styles.Cursor.Render("$" + varName))
+			extra = styles.Dim.Render("→ ") + styles.Cursor.Render("$" + varName)
 		}
-		b.WriteString("\n")
-		lines++
-	}
-
-	for lines < maxLines {
-		b.WriteString("\n")
-		lines++
-	}
-
-	b.WriteString(styles.Divider.Render(strings.Repeat("─", width)))
-	b.WriteString("\n")
-	return b.String()
-}
-
-// renderSubstituteList renders the scrolling list, mirrors renderList shape.
-// Each row is hard-truncated to terminal width so long env values (e.g. PATH)
-// can't wrap and push other rows off-screen.
-func (m *mainModel) renderSubstituteList(maxHeight int) string {
-	if m.subState == nil || len(m.subState.filtered) == 0 {
-		return ""
-	}
-
-	start, end := scrollWindow(m.subState.cursor, len(m.subState.filtered), maxHeight, &m.subState.offset)
-	width := max(m.width, 80)
-	// 2 chars for the "▶ " or "  " prefix.
-	maxLen := max(width-2, 10)
-
-	b := getBuilder()
-	defer putBuilder(b)
-	for i := start; i < end; i++ {
-		opt := m.subState.filtered[i]
-		display := truncateString(opt.Display, maxLen)
-		if i == m.subState.cursor {
-			b.WriteString(styles.Cursor.Render("▶ "))
-			b.WriteString(styles.Selected.Render(styles.Command.Render(display)))
-		} else {
-			b.WriteString("  ")
-			b.WriteString(styles.Command.Render(display))
+		
+		matchCount = len(m.subState.picker.Filtered)
+		for _, opt := range m.subState.picker.Filtered {
+			items = append(items, opt.Display)
 		}
-		b.WriteString("\n")
 	}
-	return b.String()
-}
 
-// renderSubstituteInput renders the bottom divider + hint + input, mirrors
-// renderInput's shape.
-func (m *mainModel) renderSubstituteInput(width int) string {
-	b := getBuilder()
-	defer putBuilder(b)
-	b.WriteString(styles.Divider.Render(strings.Repeat("─", width)))
-	b.WriteString("\n")
-	matchCount := 0
+	var offset *int
+	var cursor int
 	if m.subState != nil {
-		matchCount = len(m.subState.filtered)
+		offset = &m.subState.picker.Offset
+		cursor = m.subState.picker.Cursor
+	} else {
+		zero := 0
+		offset = &zero
 	}
-	b.WriteString(styles.Dim.Render(fmt.Sprintf("  %d matches", matchCount)))
-	b.WriteString(" • ")
-	b.WriteString(styles.Dim.Render("ESC cancel"))
-	b.WriteString(" • ")
-	b.WriteString(styles.Dim.Render("Enter use value"))
-	b.WriteString("\n")
-	b.WriteString(m.textInput.View())
-	return b.String()
+
+	return m.renderOverlayWindow(OverlayConfig{
+		Title:         "Substitute search",
+		TitleExtra:    extra,
+		MatchesCount:  matchCount,
+		EnterHint:     "Enter use value",
+		Items:         items,
+		SelectedIndex: cursor,
+		Offset:        offset,
+		Input:         m.textInput,
+	})
 }

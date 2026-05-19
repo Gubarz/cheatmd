@@ -27,14 +27,14 @@ func TestChainQuerySelectsNextStoredStep(t *testing.T) {
 	m.textInput.SetValue("/chain demo")
 	m.filterCheats()
 
-	if len(m.filtered) != 1 {
-		t.Fatalf("filtered chains = %d, want 1", len(m.filtered))
+	if len(m.picker.Filtered) != 1 {
+		t.Fatalf("filtered chains = %d, want 1", len(m.picker.Filtered))
 	}
-	if got := m.filtered[0].cheat.Header; got != "Second" {
+	if got := m.picker.Filtered[0].cheat.Header; got != "Second" {
 		t.Fatalf("selected chain step = %q, want Second", got)
 	}
-	if m.filtered[0].chainStep != 2 || m.filtered[0].chainTotal != 2 {
-		t.Fatalf("chain display step = %d/%d, want 2/2", m.filtered[0].chainStep, m.filtered[0].chainTotal)
+	if m.picker.Filtered[0].chainStep != 2 || m.picker.Filtered[0].chainTotal != 2 {
+		t.Fatalf("chain display step = %d/%d, want 2/2", m.picker.Filtered[0].chainStep, m.picker.Filtered[0].chainTotal)
 	}
 }
 

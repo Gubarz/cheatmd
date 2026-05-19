@@ -73,10 +73,8 @@ type mainModel struct {
 
 	// Cheat selection state
 	cheats    []cheatItem
-	filtered  []cheatItem
 	chains    []chainGroup
-	cursor    int
-	offset    int // viewport scroll offset
+	picker    *Picker[cheatItem]
 	selected  *parser.Cheat
 	columns   columnConfig
 	lastQuery string
@@ -107,7 +105,7 @@ type varResolveState struct {
 	vars                []varState
 	currentIdx          int
 	options             []string // options for current variable (from shell command)
-	filtered            []FilteredOption
+	picker              *Picker[FilteredOption]
 	selectOpts          SelectOptions
 	customHeader        string
 	shellErr            error // error from running shell command (if any)
@@ -129,7 +127,9 @@ func (m *mainModel) applyFrecency(scores map[string]float64) {
 		}
 		return left > right
 	})
-	m.filtered = m.cheats
+	if m.picker != nil {
+		m.picker.SetItems(m.cheats)
+	}
 }
 
 // FilteredOption pairs display text with original value for variable selection
@@ -155,8 +155,10 @@ func newMainModel(cheats []*parser.Cheat, index *parser.CheatIndex, exec Executo
 
 	return mainModel{
 		cheats:     items,
-		filtered:   items,
 		chains:     buildChains(cheats),
+		picker: NewPicker(items, func(item cheatItem, words []string) bool {
+			return item.matchesQuery(words)
+		}),
 		textInput:  ti,
 		columns:    loadColumnConfig(),
 		phase:      phaseCheatSelect,
