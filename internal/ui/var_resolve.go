@@ -309,12 +309,11 @@ func (m *mainModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.varState.picker.SetItems(items)
 		}
-		m.varState.picker.Filter(m.textInput.Value())
-
 		if vs.prefill != "" {
 			m.textInput.SetValue(vs.prefill)
 			m.textInput.CursorEnd()
 		}
+		m.varState.picker.Filter(m.textInput.Value())
 	}
 
 	return m, nil

@@ -115,10 +115,10 @@ func TestGetDisplayColumn(t *testing.T) {
 		},
 		{
 			name:      "comma delimited column 1",
-			line:      "admin,password123,active",
+			line:      "primary,blue,active",
 			delimiter: ",",
 			column:    1,
-			want:      "admin",
+			want:      "primary",
 		},
 		{
 			name:      "column out of range returns full line",

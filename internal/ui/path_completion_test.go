@@ -46,17 +46,17 @@ func TestCompletePathValueEscapesSpaces(t *testing.T) {
 
 func TestCompletePathValueExpandsEnvRoot(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "payloads"), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, "reports"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CHEATMD_COMPLETION_ROOT", dir)
 
-	input := "$CHEATMD_COMPLETION_ROOT/pay"
+	input := "$CHEATMD_COMPLETION_ROOT/rep"
 	result, ok := completePathValue(input, len([]rune(input)))
 	if !ok {
 		t.Fatal("expected completion")
 	}
-	if result.Value != "$CHEATMD_COMPLETION_ROOT/payloads/" {
+	if result.Value != "$CHEATMD_COMPLETION_ROOT/reports/" {
 		t.Fatalf("completion = %q", result.Value)
 	}
 }
