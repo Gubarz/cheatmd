@@ -154,8 +154,8 @@ func newMainModel(cheats []*parser.Cheat, index *parser.CheatIndex, exec Executo
 	}
 
 	return mainModel{
-		cheats:     items,
-		chains:     buildChains(cheats),
+		cheats: items,
+		chains: buildChains(cheats),
 		picker: NewPicker(items, func(item cheatItem, words []string) bool {
 			return item.matchesQuery(words)
 		}),

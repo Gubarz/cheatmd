@@ -33,7 +33,7 @@ func (m *mainModel) renderOverlayWindow(cfg OverlayConfig) string {
 
 	preview := renderOverlayPreview(width, previewHeight, cfg.Title, cfg.TitleExtra)
 	previewLines := countLines(preview)
-	
+
 	listHeight := max(height-previewLines-inputLines, 1)
 	list := renderOverlayList(listHeight, width, cfg.Items, cfg.SelectedIndex, cfg.Offset)
 

@@ -148,8 +148,6 @@ func executeOutput(command string, exec Executor) error {
 // String Utilities
 // ============================================================================
 
-
-
 // parseShellArgs parses a string into arguments, respecting quotes
 func parseShellArgs(s string) []string {
 	var args []string

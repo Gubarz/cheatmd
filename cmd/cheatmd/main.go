@@ -1,11 +1,11 @@
 package main
 
 import (
-	"strings"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -82,8 +82,6 @@ var chainResetCmd = &cobra.Command{
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runChainReset,
 }
-
-
 
 func runChainReset(cmd *cobra.Command, args []string) error {
 	root := "."

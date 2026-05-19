@@ -14,7 +14,7 @@ type Picker[T any] struct {
 	Cursor   int
 	Offset   int
 
-	FilterFn  func(item T, queryWords []string) bool
+	FilterFn func(item T, queryWords []string) bool
 }
 
 // NewPicker creates a new Picker with the given items and filter function.

@@ -289,7 +289,7 @@ func (m *mainModel) handleShellResult(msg shellResultMsg) (tea.Model, tea.Cmd) {
 		m.textInput.CursorEnd()
 	default:
 		m.varState.isPromptOnly = false
-		
+
 		// Build options list
 		opts := m.varState.selectOpts
 		items := make([]FilteredOption, len(msg.options))

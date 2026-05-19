@@ -29,16 +29,16 @@ func TestCollectHistoryOptions_OnlyAssignments(t *testing.T) {
 	dir := t.TempDir()
 	histPath := filepath.Join(dir, "history")
 	content := strings.Join([]string{
-		"ls -la",                                  // plain command, ignored
-		"export DOMAIN=corp.example.com",          // export-style
-		"USER=alice ssh prod.example.com",         // leading inline assignment
-		"grep foo bar",                            // ignored
-		"export TOKEN=\"abc 123\"",                // double-quoted value
-		"FOO=bar BAR=baz some-command --flag",     // two assignments in one line
-		"declare -x DB_HOST=db.example.com",       // declare with flag
-		": 1700000000:0;export ZSH_VAR=zvalue",    // zsh-prefixed
-		"ls -la",                                  // ignored
-		"DOMAIN=corp.example.com",                 // duplicate value, deduped
+		"ls -la",                               // plain command, ignored
+		"export DOMAIN=corp.example.com",       // export-style
+		"USER=alice ssh prod.example.com",      // leading inline assignment
+		"grep foo bar",                         // ignored
+		"export TOKEN=\"abc 123\"",             // double-quoted value
+		"FOO=bar BAR=baz some-command --flag",  // two assignments in one line
+		"declare -x DB_HOST=db.example.com",    // declare with flag
+		": 1700000000:0;export ZSH_VAR=zvalue", // zsh-prefixed
+		"ls -la",                               // ignored
+		"DOMAIN=corp.example.com",              // duplicate value, deduped
 	}, "\n") + "\n"
 	if err := os.WriteFile(histPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
