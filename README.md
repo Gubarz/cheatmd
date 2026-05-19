@@ -1,5 +1,9 @@
 # CheatMD
 
+[![CI](https://github.com/Gubarz/cheatmd/actions/workflows/ci.yml/badge.svg)](https://github.com/Gubarz/cheatmd/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/gubarz/cheatmd)](https://goreportcard.com/report/github.com/gubarz/cheatmd)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Executable Markdown cheatsheets. Write readable docs, run interactive commands.
 
 ![demo](assets/demo.gif)
@@ -125,6 +129,10 @@ Full documentation lives in the **[Wiki](../../wiki)**:
 - **[Dump](../../wiki/Dump)** - metadata export
 - **[Recipes](../../wiki/Recipes)** - copy-pasteable patterns
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
-MIT
+[MIT](LICENSE)
