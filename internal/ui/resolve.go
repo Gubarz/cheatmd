@@ -51,8 +51,8 @@ func getDisplayColumn(line, delimiter string, column int) string {
 
 // varState tracks a variable and its resolved value
 type varState struct {
-	def          parser.VarDef   // The selected/active definition
-	variants     []parser.VarDef // All conditional variants (for if/fi blocks)
+	def              parser.VarDef   // The selected/active definition
+	variants         []parser.VarDef // All conditional variants (for if/fi blocks)
 	value            string
 	resolved         bool
 	prefill          string

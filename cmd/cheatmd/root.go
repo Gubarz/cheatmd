@@ -32,6 +32,7 @@ func init() {
 	rootCmd.AddCommand(widgetCmd)
 	rootCmd.AddCommand(chainCmd)
 	rootCmd.AddCommand(dumpCmd)
+	rootCmd.AddCommand(composeCmd)
 	chainCmd.AddCommand(chainResetCmd)
 
 	rootCmd.PersistentFlags().StringP("query", "q", "", "Initial search query")
