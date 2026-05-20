@@ -27,11 +27,11 @@ func runWidget(cmd *cobra.Command, args []string) error {
 
 	switch shell {
 	case "bash":
-		fmt.Print(bashWidget())
+		fmt.Fprint(cmd.OutOrStdout(), bashWidget())
 	case "zsh":
-		fmt.Print(zshWidget())
+		fmt.Fprint(cmd.OutOrStdout(), zshWidget())
 	case "fish":
-		fmt.Print(fishWidget())
+		fmt.Fprint(cmd.OutOrStdout(), fishWidget())
 	default:
 		return fmt.Errorf("unsupported shell: %s (supported: bash, zsh, fish)", shell)
 	}

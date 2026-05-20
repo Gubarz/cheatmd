@@ -113,11 +113,11 @@ func runCheats(cmd *cobra.Command, args []string) error {
 
 	// Check for duplicate exports
 	if len(index.Duplicates) > 0 {
-		fmt.Fprintln(os.Stderr, "Warning: duplicate exports found:")
+		fmt.Fprintln(cmd.ErrOrStderr(), "Warning: duplicate exports found:")
 		for _, dup := range index.Duplicates {
-			fmt.Fprintf(os.Stderr, "  export %q defined in:\n    - %s\n    - %s\n", dup.Name, dup.File1, dup.File2)
+			fmt.Fprintf(cmd.ErrOrStderr(), "  export %q defined in:\n    - %s\n    - %s\n", dup.Name, dup.File1, dup.File2)
 		}
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(cmd.ErrOrStderr())
 	}
 
 	if len(index.Cheats) == 0 {
@@ -133,8 +133,8 @@ func runCheats(cmd *cobra.Command, args []string) error {
 		runtime.GC()
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		fmt.Printf("Loaded %d cheats in %v\n", len(index.Cheats), elapsed)
-		fmt.Printf("Memory: Alloc=%dMB, TotalAlloc=%dMB, Sys=%dMB, HeapObjects=%d\n",
+		fmt.Fprintf(cmd.OutOrStdout(), "Loaded %d cheats in %v\n", len(index.Cheats), elapsed)
+		fmt.Fprintf(cmd.OutOrStdout(), "Memory: Alloc=%dMB, TotalAlloc=%dMB, Sys=%dMB, HeapObjects=%d\n",
 			m.Alloc/1024/1024, m.TotalAlloc/1024/1024, m.Sys/1024/1024, m.HeapObjects)
 		return nil
 	}
@@ -164,7 +164,7 @@ func runCheats(cmd *cobra.Command, args []string) error {
 
 	switch config.GetOutput() {
 	case "exec":
-		fmt.Fprint(os.Stderr, finalCmd)
+		fmt.Fprint(cmd.ErrOrStderr(), finalCmd)
 		return exec.OutputWithMode(finalCmd, executor.OutputExec)
 	case "copy":
 		if err := exec.OutputWithMode(finalCmd, executor.OutputCopy); err != nil {
@@ -172,7 +172,7 @@ func runCheats(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	default: // print
-		fmt.Print(finalCmd)
+		fmt.Fprint(cmd.OutOrStdout(), finalCmd)
 		return nil
 	}
 }
