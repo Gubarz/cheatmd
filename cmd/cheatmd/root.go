@@ -140,8 +140,39 @@ func runCheats(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run the TUI (history view if --history was passed)
+	var finalCmd string
 	if historyFlag, _ := cmd.Flags().GetBool("history"); historyFlag {
-		return ui.RunHistory(index, exec)
+		finalCmd, err = ui.RunHistory(index, exec)
+	} else {
+		finalCmd, err = ui.Run(index, exec, query, match)
 	}
-	return ui.Run(index, exec, query, match)
+
+	if err != nil {
+		return err
+	}
+	if finalCmd == "" {
+		return nil
+	}
+
+	// Apply hooks
+	if preHook := config.GetPreHook(); preHook != "" {
+		finalCmd = preHook + finalCmd
+	}
+	if postHook := config.GetPostHook(); postHook != "" {
+		finalCmd = finalCmd + postHook
+	}
+
+	switch config.GetOutput() {
+	case "exec":
+		fmt.Fprint(os.Stderr, finalCmd)
+		return exec.OutputWithMode(finalCmd, executor.OutputExec)
+	case "copy":
+		if err := exec.OutputWithMode(finalCmd, executor.OutputCopy); err != nil {
+			return err
+		}
+		return nil
+	default: // print
+		fmt.Print(finalCmd)
+		return nil
+	}
 }

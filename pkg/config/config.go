@@ -155,13 +155,18 @@ func Init() error {
 	setDefaults()
 	configureViper()
 
+	var configErr error
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			fmt.Fprintf(os.Stderr, "Warning: config file error: %v\n", err)
+			configErr = fmt.Errorf("config file error: %w", err)
 		}
 	}
 
-	return viper.Unmarshal(&cfg)
+	if err := viper.Unmarshal(&cfg); err != nil {
+		return err
+	}
+
+	return configErr
 }
 
 // setDefaults sets all default values in viper

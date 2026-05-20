@@ -51,9 +51,7 @@ type systemClipboard struct{}
 func (c *systemClipboard) Copy(text string) error {
 	cmd := c.findClipboardCommand()
 	if cmd == nil {
-		// No clipboard tool found, just print
-		fmt.Println(text)
-		return nil
+		return fmt.Errorf("no clipboard tool found (tried: wl-copy, xclip, xsel, pbcopy)")
 	}
 	cmd.Stdin = strings.NewReader(text)
 	return cmd.Run()
@@ -219,7 +217,6 @@ func (e *Executor) OutputWithMode(command string, mode OutputMode) error {
 	case OutputCopy:
 		return e.clipboard.Copy(command)
 	default: // print
-		fmt.Println(command)
 		return nil
 	}
 }

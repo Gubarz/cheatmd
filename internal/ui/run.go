@@ -76,20 +76,20 @@ func getTTY() (in *os.File, out *os.File, cleanup func()) {
 }
 
 // RunTUI launches the Bubble Tea interface (unified, no flicker).
-func RunTUI(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string) error {
+func RunTUI(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string) (string, error) {
 	return RunTUIWithStart(index, exec, initialQuery, matchCmd, phaseCheatSelect)
 }
 
 // RunTUIWithStart launches the TUI and (optionally) jumps directly into a
 // non-default starting phase. startPhase == phaseCheatSelect behaves the
 // same as RunTUI; phaseHistory opens the history overlay on entry.
-func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string, startPhase uiPhase) error {
+func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string, startPhase uiPhase) (string, error) {
 	requireCheatBlock := config.GetRequireCheatBlock()
 	autoSelect := config.GetAutoSelect()
 
 	cheats := filterCheatsByConfig(index.Cheats, requireCheatBlock)
 	if len(cheats) == 0 {
-		return fmt.Errorf("no cheats found")
+		return "", fmt.Errorf("no cheats found")
 	}
 
 	m := newMainModel(cheats, index, exec)
@@ -119,7 +119,7 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 				finalCmd := exec.BuildFinalCommand(m.selected)
 				recordRun(m.selected, finalCmd)
 				advanceChain(index, m.selected, m.chainPath, m.chainState)
-				return executeOutput(finalCmd, exec)
+				return finalCmd, nil
 			}
 
 			if m.varState != nil && len(m.varState.vars) > 0 {
@@ -146,7 +146,7 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 				finalCmd := exec.BuildFinalCommand(m.selected)
 				recordRun(m.selected, finalCmd)
 				advanceChain(index, m.selected, m.chainPath, m.chainState)
-				return executeOutput(finalCmd, exec)
+				return finalCmd, nil
 			}
 		}
 	}
@@ -156,7 +156,7 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 	// jump-start currently; unsupported values are ignored.
 	if startPhase == phaseHistory && m.phase == phaseCheatSelect {
 		if !m.enterHistory() {
-			return fmt.Errorf("no history yet (run some cheats first)")
+			return "", fmt.Errorf("no history yet (run some cheats first)")
 		}
 	}
 
@@ -167,21 +167,21 @@ func RunTUIWithStart(index *parser.CheatIndex, exec Executor, initialQuery, matc
 	cleanup()
 
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	result := finalModel.(*mainModel)
 	if result.quitting && result.selected == nil {
-		return nil
+		return "", nil
 	}
 	if result.selected == nil {
-		return nil
+		return "", nil
 	}
 
 	finalCmd := exec.BuildFinalCommand(result.selected)
 	recordRun(result.selected, finalCmd)
 	advanceChain(index, result.selected, result.chainPath, result.chainState)
-	return executeOutput(finalCmd, exec)
+	return finalCmd, nil
 }
 
 func loadFrecencyScores() map[string]float64 {
