@@ -16,7 +16,6 @@ import (
 	"github.com/gubarz/cheatmd/pkg/linter"
 	"github.com/gubarz/cheatmd/pkg/parser"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var version = "0.9.1"
@@ -55,20 +54,16 @@ func init() {
 	rootCmd.AddCommand(dumpCmd)
 	chainCmd.AddCommand(chainResetCmd)
 
-	rootCmd.PersistentFlags().StringP("output", "o", "", "Output mode: print, copy, exec")
 	rootCmd.PersistentFlags().StringP("query", "q", "", "Initial search query")
-	rootCmd.PersistentFlags().StringP("match", "m", "", "Match command and pre-select if found")
-	rootCmd.PersistentFlags().Bool("print", false, "Print command (shorthand for -o print)")
-	rootCmd.PersistentFlags().Bool("copy", false, "Copy command (shorthand for -o copy)")
-	rootCmd.PersistentFlags().Bool("exec", false, "Execute command (shorthand for -o exec)")
-	rootCmd.PersistentFlags().Bool("auto", false, "Auto-select if query matches exactly one result")
+	rootCmd.PersistentFlags().StringP("match", "m", "", "Match a full command pattern and auto-fill its variables")
+	rootCmd.PersistentFlags().BoolP("print", "p", false, "Print command (default)")
+	rootCmd.PersistentFlags().BoolP("copy", "c", false, "Copy command")
+	rootCmd.PersistentFlags().BoolP("exec", "e", false, "Execute command")
+	rootCmd.PersistentFlags().BoolP("auto", "a", false, "Auto-select if query matches exactly one result")
 	rootCmd.PersistentFlags().BoolP("benchmark", "b", false, "Benchmark load time and exit")
-	rootCmd.PersistentFlags().Bool("history", false, "Open the execution history picker")
-	rootCmd.PersistentFlags().Bool("lint", false, "Lint cheats and exit")
-	rootCmd.PersistentFlags().Bool("strict", false, "Treat lint warnings as errors")
-
-	viper.BindPFlag("output", rootCmd.PersistentFlags().Lookup("output"))
-
+	rootCmd.PersistentFlags().BoolP("history", "H", false, "Open the execution history picker")
+	rootCmd.PersistentFlags().BoolP("lint", "l", false, "Lint cheats and exit")
+	rootCmd.PersistentFlags().BoolP("strict", "s", false, "Treat lint warnings as errors")
 }
 
 var chainCmd = &cobra.Command{
@@ -267,8 +262,6 @@ func runCheats(cmd *cobra.Command, args []string) error {
 		config.SetOutput("copy")
 	} else if e, _ := cmd.Flags().GetBool("exec"); e {
 		config.SetOutput("exec")
-	} else if o, _ := cmd.Flags().GetString("output"); o != "" {
-		config.SetOutput(o)
 	}
 
 	if auto, _ := cmd.Flags().GetBool("auto"); auto {
