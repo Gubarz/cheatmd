@@ -34,6 +34,7 @@ type SelectOptions struct {
 	Column       int    // 1-indexed, 0 = all (display column)
 	SelectColumn int    // 1-indexed, 0 = no extraction (return full/original line)
 	MapCmd       string // command to transform selected value
+	Multi        bool   // true if --multi is provided
 }
 
 // getDisplayColumn extracts the display column from a line
@@ -52,10 +53,12 @@ func getDisplayColumn(line, delimiter string, column int) string {
 type varState struct {
 	def          parser.VarDef   // The selected/active definition
 	variants     []parser.VarDef // All conditional variants (for if/fi blocks)
-	value        string
-	resolved     bool
-	prefill      string
-	skipAutoCont bool // True if user went back to this var - don't auto-continue
+	value            string
+	resolved         bool
+	prefill          string
+	skipAutoCont     bool // True if user went back to this var - don't auto-continue
+	multiSelected    []string
+	multiSelectedSet map[string]bool
 }
 
 // collectVariables gathers all variable definitions from imports and local
