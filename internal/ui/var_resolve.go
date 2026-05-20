@@ -63,6 +63,7 @@ func (m *mainModel) startVarResolutionInternal() {
 		} else if envVal := os.Getenv(varName); envVal != "" {
 			vars[i].prefill = envVal
 		}
+		vars[i].multiSelectedSet = make(map[string]bool)
 	}
 
 	m.varState = &varResolveState{
@@ -212,6 +213,8 @@ func parseSelectorOpts(selectorArgs string) SelectOptions {
 				opts.MapCmd = args[i+1]
 				i++
 			}
+		case "--multi":
+			opts.Multi = true
 		}
 	}
 	return opts
@@ -365,6 +368,28 @@ func (m *mainModel) handleVarResolveKey(msg tea.KeyMsg) tea.Cmd {
 				m.textInput.CursorEnd()
 			}
 		}
+	case " ":
+		if m.varState.selectOpts.Multi && !m.varState.isPromptOnly && m.varState.picker != nil {
+			if opt, ok := m.varState.picker.Selected(); ok {
+				vs := &m.varState.vars[m.varState.currentIdx]
+				original := opt.Original
+				if vs.multiSelectedSet[original] {
+					vs.multiSelectedSet[original] = false
+					// Remove from multiSelected list
+					for i, val := range vs.multiSelected {
+						if val == original {
+							vs.multiSelected = append(vs.multiSelected[:i], vs.multiSelected[i+1:]...)
+							break
+						}
+					}
+				} else {
+					vs.multiSelectedSet[original] = true
+					vs.multiSelected = append(vs.multiSelected, original)
+				}
+				// Don't pass space to text input, just return nil to re-render
+				return nil
+			}
+		}
 	default:
 		if msg.String() == config.GetKeyOpen() {
 			if m.varState != nil && m.varState.cheat != nil {
@@ -448,6 +473,19 @@ func (m *mainModel) acceptVarValue() tea.Cmd {
 
 	if m.varState.isPromptOnly {
 		value = m.textInput.Value()
+	} else if m.varState.selectOpts.Multi && len(vs.multiSelected) > 0 {
+		var mapped []string
+		for _, selected := range vs.multiSelected {
+			if m.varState.selectOpts.MapCmd != "" {
+				selected = applyMapTransform(selected, m.varState.selectOpts)
+			}
+			mapped = append(mapped, selected)
+		}
+		delim := m.varState.selectOpts.Delimiter
+		if delim == "" {
+			delim = ","
+		}
+		value = strings.Join(mapped, delim)
 	} else if m.varState.picker != nil {
 		if opt, ok := m.varState.picker.Selected(); ok {
 			selected := opt.Original
@@ -536,11 +574,24 @@ func (m *mainModel) renderVarBottomWithHeight(width int, maxHeight int) string {
 
 		for i := start; i < end; i++ {
 			opt := m.varState.picker.Filtered[i]
+
+			checkbox := ""
+			if m.varState.selectOpts.Multi {
+				vs := &m.varState.vars[m.varState.currentIdx]
+				if vs.multiSelectedSet[opt.Original] {
+					checkbox = styles.Command.Render("[x] ")
+				} else {
+					checkbox = styles.Dim.Render("[ ] ")
+				}
+			}
+
 			if i == m.varState.picker.Cursor {
 				b.WriteString(styles.Cursor.Render("▶ "))
+				b.WriteString(checkbox)
 				b.WriteString(styles.Selected.Render(styles.Command.Render(opt.Display)))
 			} else {
 				b.WriteString("  ")
+				b.WriteString(checkbox)
 				b.WriteString(styles.Command.Render(opt.Display))
 			}
 			b.WriteString("\n")
@@ -558,6 +609,10 @@ func (m *mainModel) renderVarBottomWithHeight(width int, maxHeight int) string {
 		b.WriteString(" • ")
 	}
 	b.WriteString(styles.Dim.Render("ESC back"))
+	if m.varState.selectOpts.Multi {
+		b.WriteString(" • ")
+		b.WriteString(styles.Dim.Render("Space toggle"))
+	}
 	b.WriteString(" • ")
 	b.WriteString(styles.Dim.Render("Enter accept"))
 	b.WriteString("\n")
