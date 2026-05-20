@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -16,13 +14,13 @@ import (
 // ============================================================================
 
 // Run launches the Bubble Tea TUI interface
-func Run(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string) error {
+func Run(index *parser.CheatIndex, exec Executor, initialQuery, matchCmd string) (string, error) {
 	return RunTUI(index, exec, initialQuery, matchCmd)
 }
 
 // RunHistory launches the TUI with the history overlay open. If history is
 // empty or unreadable, an error is returned without entering the TUI.
-func RunHistory(index *parser.CheatIndex, exec Executor) error {
+func RunHistory(index *parser.CheatIndex, exec Executor) (string, error) {
 	return RunTUIWithStart(index, exec, "", "", phaseHistory)
 }
 
@@ -116,33 +114,6 @@ func extractCustomHeader(selectorArgs string) string {
 // ============================================================================
 // Output Handling
 // ============================================================================
-
-// executeOutput handles the final command based on output mode
-func executeOutput(command string, exec Executor) error {
-	// Apply hooks
-	finalCmd := command
-	if preHook := config.GetPreHook(); preHook != "" {
-		finalCmd = preHook + finalCmd
-	}
-	if postHook := config.GetPostHook(); postHook != "" {
-		finalCmd = finalCmd + postHook
-	}
-
-	switch config.GetOutput() {
-	case "exec":
-		fmt.Fprintf(os.Stderr, "\033[1;32m▶ Executing:\033[0m %s\n", finalCmd)
-		return exec.OutputWithMode(finalCmd, executor.OutputExec)
-	case "copy":
-		if err := exec.OutputWithMode(finalCmd, executor.OutputCopy); err != nil {
-			return err
-		}
-		fmt.Fprintf(os.Stderr, "\033[1;33m✓ Copied to clipboard\033[0m\n")
-		return nil
-	default: // print
-		fmt.Print(finalCmd)
-		return nil
-	}
-}
 
 // ============================================================================
 // String Utilities

@@ -101,9 +101,9 @@ func TestSubstituteVars_Angle(t *testing.T) {
 		},
 		{
 			name:     "multiple angle vars",
-			input:    "nmap -p <port> <host>",
-			scope:    map[string]string{"port": "80", "host": "10.0.0.1"},
-			expected: "nmap -p 80 10.0.0.1",
+			input:    "ssh -p <port> user@<host>",
+			scope:    map[string]string{"port": "2222", "host": "10.0.0.1"},
+			expected: "ssh -p 2222 user@10.0.0.1",
 		},
 		{
 			name:     "preserves shell vars",
@@ -132,9 +132,9 @@ func TestSubstituteVars_Both(t *testing.T) {
 	}{
 		{
 			name:     "dollar and angle both replaced",
-			input:    "nmap $host <port>",
-			scope:    map[string]string{"host": "10.0.0.1", "port": "443"},
-			expected: "nmap 10.0.0.1 443",
+			input:    "curl $host:<port>",
+			scope:    map[string]string{"host": "http://10.0.0.1", "port": "443"},
+			expected: "curl http://10.0.0.1:443",
 		},
 		{
 			name:     "same var in both syntaxes",

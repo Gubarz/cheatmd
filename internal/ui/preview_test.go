@@ -7,7 +7,7 @@ import (
 )
 
 func TestFindCheatHeaderSourceLineSkipsSameNamedPageHeader(t *testing.T) {
-	raw := `# Responder
+	raw := `# Ping
 
 Overview prose.
 
@@ -16,10 +16,10 @@ export interface
 var interface
 -->
 
-## Responder
+## Ping
 
 ` + "```sh" + `
-sudo responder -I $interface
+ping -I $interface 8.8.8.8
 ` + "```" + `
 <!-- cheat
 import interface
@@ -27,8 +27,8 @@ import interface
 `
 
 	line := findCheatHeaderSourceLine(raw, &parser.Cheat{
-		Header:  "Responder",
-		Command: "sudo responder -I $interface",
+		Header:  "Ping",
+		Command: "ping -I $interface 8.8.8.8",
 	})
 	if line != 9 {
 		t.Fatalf("expected executable cheat header line 9, got %d", line)
